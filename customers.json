@@ -1,0 +1,23 @@
+{
+  "customers": {
+    "default": {
+      "display_name": "Church Teachers College",
+      "server": "Chris",
+      "database": "ChurchTeachersCollegeDB",
+      "encrypt": "Optional"
+    },
+    "ctc": {
+      "display_name": "Church Teachers College",
+      "server": "Chris",
+      "database": "ChurchTeachersCollegeDB",
+      "encrypt": "Optional"
+    },
+    "example_school": {
+      "display_name": "Example School",
+      "server": "your-host-or-instance",
+      "database": "ExampleSchoolDB",
+      "encrypt": "Mandatory",
+      "_comment_auth": "Windows auth by default. For SQL auth add 'username' and 'password' here, and protect this file (see SECURITY NOTE in appconfig.py)."
+    }
+  }
+}
