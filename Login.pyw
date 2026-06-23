@@ -255,9 +255,15 @@ class LoginScreen(tk.Tk):
     def _open_main(self):
         target = self._target_screen or REQUISITION_SCREEN
         user_id = getattr(self, "user_id", None)
+        token = getattr(self, "auth_token", None)
+        # Publish the real signed token so the launched screen (and everything
+        # it launches in turn) authenticates as this user. Each screen's _db
+        # module reads CTC_AUTH_TOKEN from the environment.
+        if token:
+            os.environ["CTC_AUTH_TOKEN"] = token
         self.destroy()
-        # Hand the authenticated UserID to the next screen so it identifies the
-        # user from the login rather than the OS account.
+        # The UserID is still passed on the command line as a dev-mode fallback;
+        # when a real token is present, that's what actually authenticates.
         if user_id is not None:
             launch(target, user_id)
         else:

@@ -31,14 +31,22 @@ LOCAL_CONN = (
 
 
 # DEV ONLY - token format "dev:<user_id>", gated by an env flag so it can't ship.
+# Resolves an auth token to a user id, or None to reject (-> 401).
+# Real path: verify a signed JWT. Dev path: accept "dev:<id>" only when CTC_DEV_AUTH=1.
 def resolve_user_id(token: str) -> int | None:
+    # Dev shortcut — only when explicitly enabled, never in production.
     if os.environ.get("CTC_DEV_AUTH") == "1" and token.startswith("dev:"):
         try:
             return int(token.split(":", 1)[1])
         except ValueError:
             return None
-    return None  # real JWT / Entra validation goes here
 
+    # Real path: a signed JWT issued by /auth/login.
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])
+        return int(payload["sub"])
+    except (jwt.InvalidTokenError, KeyError, ValueError):
+        return None
 
 def get_connection():
     return pyodbc.connect(os.environ.get("DB_CONNECTION_STRING", LOCAL_CONN))
@@ -121,9 +129,10 @@ def register_logon(cursor, user_id, user_name, os_user):
 
 
 def issue_token(user_id: int, is_admin: bool) -> str:
-    # TEMPORARY dev token matching resolve_user_id above.
-    return f"dev:{user_id}"
-
+    # Real signed JWT (was the dev:<id> string). is_admin is intentionally not
+    # encoded — the server re-checks group membership per request, so the token
+    # only proves identity, not privileges.
+    return create_token(user_id)
 
 @app.post("/auth/login", response_model=LoginResponse)
 def login(req: LoginRequest):
@@ -807,3 +816,23 @@ def req_delete_attachment(att_id: int, _: int = Depends(current_user_id)):
                     (att_id,))
         conn.commit()
     return {"ok": True}
+    
+import jwt
+from datetime import datetime, timezone, timedelta
+
+JWT_ALG = "HS256"
+JWT_TTL_HOURS = 12
+JWT_SECRET = os.environ.get("CTC_JWT_SECRET")
+if not JWT_SECRET:
+    if os.environ.get("CTC_DEV_AUTH") == "1":
+        JWT_SECRET = "dev-only-insecure-secret"   # local convenience ONLY
+    else:
+        raise RuntimeError("CTC_JWT_SECRET must be set (no insecure default outside dev mode).")
+
+
+def create_token(user_id, full_name=""):
+    now = datetime.now(timezone.utc)
+    return jwt.encode(
+        {"sub": str(user_id), "name": full_name or "",
+         "iat": now, "exp": now + timedelta(hours=JWT_TTL_HOURS)},
+        JWT_SECRET, algorithm=JWT_ALG)
