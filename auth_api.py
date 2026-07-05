@@ -7,7 +7,7 @@ list endpoints. Runs against your existing SQL Server. Same command as before:
     set CTC_DEV_AUTH=1
     uvicorn auth_api:app --reload
 """
-
+# deploy test
 import os
 import hashlib
 

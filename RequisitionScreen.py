@@ -4,6 +4,7 @@ import pyodbc
 import os
 import sys
 import subprocess
+from pathlib import Path
 
 # ── Database ─────────────────────────────────────────────────────────────────
 
@@ -15,10 +16,23 @@ DB_CONN = (
     r"encrypt=Optional;"
 )
 
-REQUISITION_FORM = (
-    r"C:\Users\chris\AppData\Local\Programs\Python\Python314"
-    r"\ChurchTeachersCollege\PythonApplication1\RequisitionForm.pyw"
-)
+def _resource_base():
+    """Bundle dir when packaged by PyInstaller, else this file's folder."""
+    if getattr(sys, "frozen", False):
+        return sys._MEIPASS
+    return os.path.dirname(os.path.abspath(__file__))
+
+REQUISITION_FORM = os.path.join(_resource_base(), "RequisitionForm.pyw")
+
+
+def _launch_form():
+    """Open the Requisition form: the sibling .exe when packaged, else the
+    .pyw via Python when running from source."""
+    if getattr(sys, "frozen", False):
+        exe_dir = os.path.dirname(sys.executable)
+        subprocess.Popen([os.path.join(exe_dir, "RequisitionForm.exe")])
+    else:
+        subprocess.Popen([sys.executable, REQUISITION_FORM])
 
 def get_connection():
     return pyodbc.connect(DB_CONN)
@@ -468,7 +482,7 @@ class RequisitionScreen(tk.Tk):
 
     def _open_requisition_form(self):
         try:
-            subprocess.Popen([sys.executable, REQUISITION_FORM])
+            _launch_form()
         except FileNotFoundError:
             tk.messagebox.showerror(
                 "Not found",

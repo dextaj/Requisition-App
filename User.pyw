@@ -1,8 +1,8 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 import os
-
 import requests
+import branding
 from user_db import fetch_all_users, fetch_user, save_user
 
 # ─────────────────────────────────────────────
@@ -139,7 +139,7 @@ class UserScreen(tk.Tk):
         hdr = tk.Frame(self, bg=C_HEADER_BG, height=70)
         hdr.pack(fill="x")
         hdr.pack_propagate(False)
-
+        branding.add_logo(hdr, self, bg=C_HEADER_BG)
         tk.Label(hdr, text="User Information",
                  font=FONT_TITLE, bg=C_HEADER_BG, fg="white").pack(
             side="left", padx=24, pady=14)

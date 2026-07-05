@@ -1,3 +1,8 @@
+import os
+os.environ.setdefault(
+    "CTC_API_BASE",
+    "https://ctc-requisition-api-aybadkhdftfpf4cf.centralus-01.azurewebsites.net",
+)
 import tkinter as tk
 from tkinter import messagebox
 import subprocess
@@ -13,12 +18,17 @@ log = applog.get_logger("login")
 # ─────────────────────────────────────────────
 #  PATHS
 # ─────────────────────────────────────────────
-BASE_DIR   = Path(r"C:\Users\chris\AppData\Local\Programs\Python\Python314"
-                  r"\ChurchTeachersCollege\PythonApplication1")
+def _resource_base():
+    """Where bundled files live: the PyInstaller temp dir when frozen,
+    otherwise this script's own folder."""
+    if getattr(sys, "frozen", False):
+        return Path(sys._MEIPASS)
+    return Path(__file__).resolve().parent
+
+BASE_DIR   = _resource_base()
 ASSETS_DIR = BASE_DIR / "assets"
 ADMIN_SCREEN       = BASE_DIR / "AdminScreen.pyw"
 REQUISITION_SCREEN = BASE_DIR / "RequisitionScreen.pyw"
-
 # ─────────────────────────────────────────────
 #  DESIGN TOKENS
 # ─────────────────────────────────────────────
@@ -62,15 +72,21 @@ def make_button(parent, text, command, variant="primary", width=12):
 
 
 def launch(path, *args):
-    """Launch a Python script as a non-blocking subprocess.
+    """Launch a screen as a non-blocking subprocess.
 
-    Extra args are passed on the command line - used to hand the
-    authenticated UserID to the screen being opened.
+    From source: run the .pyw with the Python interpreter (current behavior).
+    When packaged (PyInstaller): run the sibling .exe in the same folder,
+    since the .pyw files no longer exist as runnable scripts.
     """
     try:
-        subprocess.Popen([sys.executable, str(path), *map(str, args)])
+        if getattr(sys, "frozen", False):
+            exe_dir = os.path.dirname(sys.executable)
+            target = os.path.join(exe_dir, Path(path).stem + ".exe")
+            subprocess.Popen([target, *map(str, args)])
+        else:
+            subprocess.Popen([sys.executable, str(path), *map(str, args)])
     except FileNotFoundError:
-        messagebox.showerror("Not Found", f"Could not find:\n{path}")
+        messagebox.showerror("Not Found", f"Could not launch:\n{path}")
 
 # ─────────────────────────────────────────────
 #  MAIN APPLICATION

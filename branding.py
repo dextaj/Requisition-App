@@ -20,18 +20,21 @@ Usage in any screen's _build_header:
 """
 
 import os
+import sys
 from PIL import Image, ImageTk
 
 # ─────────────────────────────────────────────
 #  PATHS
 # ─────────────────────────────────────────────
-# Resolve the assets folder relative to THIS file, so it keeps working
-# even if the app is moved to another machine or folder.
-_BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
+def _resource_base():
+    """Bundle dir when packaged by PyInstaller, else this file's folder."""
+    if getattr(sys, "frozen", False):
+        return sys._MEIPASS
+    return os.path.dirname(os.path.abspath(__file__))
+
+_BASE_DIR   = _resource_base()
 ASSETS_DIR  = os.path.join(_BASE_DIR, "assets")
 LOGO_PATH   = os.path.join(ASSETS_DIR, "image.png")
-
-
 # ─────────────────────────────────────────────
 #  LOGO LOADER
 # ─────────────────────────────────────────────

@@ -11,6 +11,7 @@ import applog
 
 import admin_db
 from admin_db import Database, KeywordChanges
+from pathlib import Path
 
 log = applog.get_logger("admin")
 
@@ -18,12 +19,15 @@ log = applog.get_logger("admin")
 # ─────────────────────────────────────────────
 #  CONFIGURATION
 # ─────────────────────────────────────────────
+def _resource_base():
+    """Bundle dir when packaged by PyInstaller, else this file's folder."""
+    if getattr(sys, "frozen", False):
+        return sys._MEIPASS
+    return os.path.dirname(os.path.abspath(__file__))
+    
+    
 class Config:
-    BASE_PATH = os.environ.get(
-        "CTC_APP_PATH",
-        r"C:\Users\chris\AppData\Local\Programs\Python\Python314"
-        r"\ChurchTeachersCollege\PythonApplication1",
-    )
+    BASE_PATH = os.environ.get("CTC_APP_PATH", _resource_base())
     USER_APP        = os.path.join(BASE_PATH, "User.pyw")
     REQUISITION_APP = os.path.join(BASE_PATH, "RequisitionScreen.pyw")
 
@@ -64,10 +68,19 @@ FONT_CAPTION = ("Verdana",  10)
 
 def launch(path: str, *args) -> None:
     """Launch a screen, passing the admin's auth token via the environment so
-    the launched screen authenticates as the same user."""
+    the launched screen authenticates as the same user.
+
+    From source: run the .pyw with Python. When packaged (PyInstaller): run the
+    sibling .exe in the same folder, since the .pyw files aren't runnable then.
+    """
     env = {**os.environ, "CTC_AUTH_TOKEN": admin_db.token() or ""}
     try:
-        subprocess.Popen([sys.executable, path, *map(str, args)], env=env)
+        if getattr(sys, "frozen", False):
+            exe_dir = os.path.dirname(sys.executable)
+            target = os.path.join(exe_dir, Path(str(path)).stem + ".exe")
+            subprocess.Popen([target, *map(str, args)], env=env)
+        else:
+            subprocess.Popen([sys.executable, path, *map(str, args)], env=env)
     except FileNotFoundError:
         messagebox.showerror("Not Found", f"Could not find:\n{path}")
 
@@ -120,9 +133,8 @@ class KeywordWindow(tk.Toplevel):
         hdr = tk.Frame(self, bg=C_HEADER_BG, height=56)
         hdr.pack(fill="x")
         hdr.pack_propagate(False)
-        tk.Label(hdr, text=f"Keyword — {self.table_name}",
-                 font=("Georgia", 14, "bold"),
-                 bg=C_HEADER_BG, fg="white").pack(side="left", padx=20, pady=12)
+        branding.add_logo(hdr, self, bg=C_HEADER_BG, height=36)
+        tk.Label(hdr, text=f"Keyword — {self.table_name}",)
 
         # Bordered white panel (mirrors the Group window's list panels)
         panel = tk.Frame(self, bg=C_PANEL,
@@ -339,9 +351,8 @@ class GroupWindow(tk.Toplevel):
         hdr = tk.Frame(self, bg=C_HEADER_BG, height=56)
         hdr.pack(fill="x")
         hdr.pack_propagate(False)
-        tk.Label(hdr, text=f"Group — {self.group_name}",
-                 font=("Georgia", 14, "bold"),
-                 bg=C_HEADER_BG, fg="white").pack(side="left", padx=20, pady=12)
+        branding.add_logo(hdr, self, bg=C_HEADER_BG, height=36)
+        tk.Label(hdr, text=f"Group — {self.group_name}",)
 
         body = tk.Frame(self, bg=C_BG)
         body.pack(fill="both", expand=True, padx=16, pady=12)
@@ -502,9 +513,8 @@ class SignatureWindow(tk.Toplevel):
         hdr = tk.Frame(self, bg=C_HEADER_BG, height=56)
         hdr.pack(fill="x")
         hdr.pack_propagate(False)
-        tk.Label(hdr, text=f"Signature — {self.user_name}",
-                 font=("Georgia", 14, "bold"),
-                 bg=C_HEADER_BG, fg="white").pack(side="left", padx=20, pady=12)
+        branding.add_logo(hdr, self, bg=C_HEADER_BG, height=36)
+        tk.Label(hdr, text=f"Signature — {self.user_name}",)
 
         panel = tk.Frame(self, bg=C_PANEL,
                          highlightthickness=1, highlightbackground=C_BORDER)
