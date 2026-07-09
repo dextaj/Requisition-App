@@ -72,7 +72,13 @@ def fetch_requisitions(user_id, user_name, view_all=False):
         log.error("fetch_requisitions failed: %s", exc)
         return []
 
-
+def fetch_by_department(dept):
+    try:
+        return _get(f"/requisitions/by-department/{dept}")
+    except requests.RequestException as exc:
+        log.error("fetch_by_department failed: %s", exc)
+        return []
+        
 def fetch_summary_counts(user_name):
     try:
         d = _get("/requisitions/summary")

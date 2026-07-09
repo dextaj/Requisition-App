@@ -78,10 +78,10 @@ ITEM_COLUMNS_FARM = [
 #  PHASES
 # ---------------------------------------------
 PHASES_STANDARD    = ["Draft", "HOD Review", "VP Review",
-                      "Principal Approval", "Procurement", "Accounts"]
+                      "Principal Approval", "Procurement", "Accounts", "Completed"]
 PHASES_MAINTENANCE = ["Draft", "HOD Review", "VP Review", "Maintenance Unit",
-                      "VP Approval", "Principal Approval", "Procurement", "Accounts"]
-PHASES_TRANSPORT   = ["Draft", "HOD Review", "VP Approval", "Accounts"]
+                      "VP Approval", "Principal Approval", "Procurement", "Accounts", "Completed"]
+PHASES_TRANSPORT   = ["Draft", "HOD Review", "VP Approval", "Accounts", "Completed"]
 
 def get_phases(category, via_maintenance=False):
     if category == "Transport":
@@ -376,6 +376,7 @@ class RequisitionForm(tk.Tk):
         self.geometry("1400x900")
         self.minsize(1100, 700)
         self.configure(bg=C_BG)
+        self.state("zoomed")
 
         self.today = date.today()
 
@@ -391,6 +392,10 @@ class RequisitionForm(tk.Tk):
         self.doc_var         = tk.StringVar()
         self.mvar            = tk.BooleanVar()
         self.accounts_ack_var = tk.BooleanVar()
+        self.send_kitchen_var     = tk.BooleanVar()
+        self.send_household_var   = tk.BooleanVar()
+        self.send_it_var          = tk.BooleanVar()
+        self.send_maintenance_var = tk.BooleanVar()
         self.request_option  = tk.StringVar(value="Material Only")
         self.site_var        = tk.StringVar(value="")
         self.category_var    = tk.StringVar(value="")
@@ -410,9 +415,15 @@ class RequisitionForm(tk.Tk):
 
         (self.current_user_id, user_name,
          doc_number, req_row, assigned_to) = load_session()
+        self.current_user_name = user_name or ""
         if user_name:
             self.logon_user_var.set(f"  {user_name}  ")
         self.assigned_to = assigned_to if assigned_to is not None else ""
+
+        # New requisition (no existing row loaded): default Created By to the
+        # logged-in user. Existing requisitions keep their saved Created By.
+        if not req_row and user_name:
+            self.createdBy_entry.insert(0, user_name)
 
         if doc_number:
             self.docNumber_entry.config(state="normal")
@@ -462,9 +473,9 @@ class RequisitionForm(tk.Tk):
     def _build_ui(self):
         self._build_header()
         self._build_phase_band()
-        self._build_body()
-        self._build_button_bar()
-        self._build_status_bar()
+        self._build_status_bar()    # bottom-anchored, packed first
+        self._build_button_bar()    # bottom-anchored, packed before body
+        self._build_body()          # fills the remaining space
         self.columnconfigure(0, weight=1)
         self.rowconfigure(2, weight=1)
 
@@ -649,6 +660,35 @@ class RequisitionForm(tk.Tk):
             font=FONT_CAPTION, bg=C_PANEL, fg=C_TEXT,
             activebackground=C_PANEL, selectcolor=C_PANEL, cursor="hand2")
         self.mcheck.grid(row=5, column=0, columnspan=3, sticky="w", pady=6)
+        
+        # Send to Department(s) — shown/editable at VP Review
+        self.send_dept_frame = tk.Frame(info, bg=C_PANEL)
+        self.send_dept_frame.grid(row=7, column=0, columnspan=6,
+                                  sticky="w", pady=(4, 6))
+        tk.Label(self.send_dept_frame, text="Send to Department(s):",
+                 font=FONT_LABEL, bg=C_PANEL, fg=C_HEADER_BG).pack(
+            side="left", padx=(0, 12))
+        self.send_kitchen_check = tk.Checkbutton(
+            self.send_dept_frame, text="Kitchen", variable=self.send_kitchen_var,
+            font=FONT_CAPTION, bg=C_PANEL, fg=C_TEXT,
+            activebackground=C_PANEL, selectcolor=C_PANEL, cursor="hand2")
+        self.send_kitchen_check.pack(side="left", padx=6)
+        self.send_household_check = tk.Checkbutton(
+            self.send_dept_frame, text="Household", variable=self.send_household_var,
+            font=FONT_CAPTION, bg=C_PANEL, fg=C_TEXT,
+            activebackground=C_PANEL, selectcolor=C_PANEL, cursor="hand2")
+        self.send_household_check.pack(side="left", padx=6)
+        self.send_it_check = tk.Checkbutton(
+            self.send_dept_frame, text="IT", variable=self.send_it_var,
+            font=FONT_CAPTION, bg=C_PANEL, fg=C_TEXT,
+            activebackground=C_PANEL, selectcolor=C_PANEL, cursor="hand2")
+        self.send_it_check.pack(side="left", padx=6)
+        self.send_maintenance_check = tk.Checkbutton(
+            self.send_dept_frame, text="Maintenance", variable=self.send_maintenance_var,
+            font=FONT_CAPTION, bg=C_PANEL, fg=C_TEXT,
+            activebackground=C_PANEL, selectcolor=C_PANEL, cursor="hand2")
+        self.send_maintenance_check.pack(side="left", padx=6)
+        self.send_dept_frame.grid_remove()   # hidden until VP Review
 
         # Items Requested
         self.req_outer, req_inner = card(sf, "Items Requested", row=1, col=0, pady=0)
@@ -905,6 +945,10 @@ class RequisitionForm(tk.Tk):
         self.vpSignatureEntry.insert(0, safe("VP_Signature"))
         self.principalSignatureEntry.insert(0, safe("Principal_Signature"))
         self.accounts_ack_var.set(bool(safe("Accounts_Acknowledged")))
+        self.send_kitchen_var.set(bool(safe("Send_Kitchen")))
+        self.send_household_var.set(bool(safe("Send_Household")))
+        self.send_it_var.set(bool(safe("Send_IT")))
+        self.send_maintenance_var.set(bool(safe("Send_Maintenance")))
 
         if safe("Category") == "Infrastructure":
             self.maintenance_label.grid()
@@ -1279,8 +1323,8 @@ class RequisitionForm(tk.Tk):
 
         show(self.att_outer)
 
-        (unlock_entry if phase in ("Procurement", "Accounts")
-         else lock_entry)(self.costEntry)
+        (lock_entry if phase == "Accounts"
+         else unlock_entry)(self.costEntry)
 
         if phase in ("", "Draft", "HOD Review"):
             hide(self.acct_outer)
@@ -1292,6 +1336,23 @@ class RequisitionForm(tk.Tk):
             (unlock_entry if prin_ok else lock_entry)(self.principalSignatureEntry)
             self.acctAckCheck.config(
                 state="normal" if phase == "Accounts" else "disabled")
+                
+        # Send to Department(s): visible and editable only at VP Review
+        if phase == "VP Review":
+            self.send_dept_frame.grid()
+            for cb in (self.send_kitchen_check, self.send_household_check,
+                       self.send_it_check, self.send_maintenance_check):
+                cb.config(state="normal")
+        else:
+            for cb in (self.send_kitchen_check, self.send_household_check,
+                       self.send_it_check, self.send_maintenance_check):
+                cb.config(state="disabled")
+            # keep visible (read-only) if any are already set, else hide
+            if any(v.get() for v in (self.send_kitchen_var, self.send_household_var,
+                                     self.send_it_var, self.send_maintenance_var)):
+                self.send_dept_frame.grid()
+            else:
+                self.send_dept_frame.grid_remove()
 
     def _assign_doc_number(self):
         if self.doc_var.get():
@@ -1408,6 +1469,10 @@ class RequisitionForm(tk.Tk):
             "VP_Signature": self.vpSignatureEntry.get(),
             "Principal_Signature": self.principalSignatureEntry.get(),
             "Accounts_Acknowledged": 1 if self.accounts_ack_var.get() else 0,
+            "Send_Kitchen":     1 if self.send_kitchen_var.get() else 0,
+            "Send_Household":   1 if self.send_household_var.get() else 0,
+            "Send_IT":          1 if self.send_it_var.get() else 0,
+            "Send_Maintenance": 1 if self.send_maintenance_var.get() else 0,
         }
 
     # -- Signatures & PDF ------------------------------------------------------
@@ -1502,8 +1567,20 @@ class RequisitionForm(tk.Tk):
             messagebox.showwarning(
                 "Complete", "This requisition has already reached the final phase.")
             return
-        next_phase = phases[current_idx + 1]
-        user_list  = fetch_users()
+
+        # Branch: at VP Review, if any department box is ticked, the requisition
+        # is routed to those departments and skips the rest of the approval chain.
+        any_dept = any(v.get() for v in (
+            self.send_kitchen_var, self.send_household_var,
+            self.send_it_var, self.send_maintenance_var))
+        if self.current_phase == "VP Review" and any_dept:
+            next_phase = "Completed"
+        else:
+            next_phase = phases[current_idx + 1]
+
+        # Completed is terminal — no assignee is chosen.
+        completing = (next_phase == "Completed")
+        user_list  = fetch_users() if not completing else []
 
         win = tk.Toplevel(self)
         win.title("Submit Requisition")
@@ -1536,21 +1613,28 @@ class RequisitionForm(tk.Tk):
              tk.Entry(body, textvariable=tk.StringVar(value=str(self.today)),
                       font=FONT_ENTRY, state="readonly",
                       bg="#F0F0F0", relief="flat", bd=4), 1)
-        assignee_combo = ttk.Combobox(body, values=user_list,
-                                      state="readonly", font=FONT_ENTRY)
-        frow("Assigned To", assignee_combo, 2)
+        if completing:
+            assignee_combo = None
+            tk.Label(body, text="(No assignee — this completes the requisition)",
+                     font=FONT_CAPTION, bg=C_BG, fg=C_TEXT_MUTED).grid(
+                row=2, column=0, columnspan=2, sticky="w", pady=6)
+        else:
+            assignee_combo = ttk.Combobox(body, values=user_list,
+                                          state="readonly", font=FONT_ENTRY)
+            frow("Assigned To", assignee_combo, 2)
 
         bf = tk.Frame(win, bg=C_BG, padx=28, pady=10)
         bf.pack(fill="x")
 
         def do_submit():
-            if not assignee_combo.get():
+            if not completing and not assignee_combo.get():
                 messagebox.showwarning("Required", "Please select an assignee.")
                 return
+            assignee = "" if completing else assignee_combo.get()
             try:
                 submit_requisition(
                     doc_number, self._build_fields(), self._collect_items(),
-                    assignee_combo.get(), self.current_phase,
+                    assignee, self.current_phase,
                     comments=st_get(self.HODcomment_entry))
             except requests.HTTPError as exc:
                 # 403 = not your assignment, 409 = phase changed / already final

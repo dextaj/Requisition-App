@@ -187,7 +187,20 @@ def list_requisitions(scope: str = "mine", user_id: int = Depends(current_user_i
                         (name,))
         return [list(r) for r in cur.fetchall()]
 
-
+@app.get("/requisitions/by-department/{dept}")
+def list_by_department(dept: str, _: int = Depends(current_user_id)):
+    columns = {"kitchen": "Send_Kitchen", "household": "Send_Household",
+               "it": "Send_IT", "maintenance": "Send_Maintenance"}
+    col = columns.get(dept.lower())
+    if col is None:
+        raise HTTPException(404, "Unknown department.")
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT * FROM REQUISITION.REQUISITION_TABLE "
+            f"WHERE {col} = 1 AND Phase = 'Completed'")
+        return [list(r) for r in cur.fetchall()]
+        
 @app.get("/requisitions/summary")
 def summary(user_id: int = Depends(current_user_id)):
     with get_connection() as conn:
@@ -509,10 +522,10 @@ STORAGE_DIR = os.environ.get(
 DOC_PREFIXES = {"Transport": "TRAN-", "Infrastructure": "INFR-",
                 "Household": "HSLD-", "Kitchen": "KTCN-"}
 PHASES_STANDARD    = ["Draft", "HOD Review", "VP Review",
-                      "Principal Approval", "Procurement", "Accounts"]
+                      "Principal Approval", "Procurement", "Accounts", "Completed"]
 PHASES_MAINTENANCE = ["Draft", "HOD Review", "VP Review", "Maintenance Unit",
-                      "VP Approval", "Principal Approval", "Procurement", "Accounts"]
-PHASES_TRANSPORT   = ["Draft", "HOD Review", "VP Approval", "Accounts"]
+                      "VP Approval", "Principal Approval", "Procurement", "Accounts", "Completed"]
+PHASES_TRANSPORT   = ["Draft", "HOD Review", "VP Approval", "Accounts", "Completed"]
 APPROVER_PHASE_COLUMN = {
     "HOD Review": "HOD_Approver_ID", "VP Review": "VP_Approver_ID",
     "VP Approval": "VP_Approver_ID", "Principal Approval": "Principal_Approver_ID"}
@@ -534,6 +547,8 @@ class ReqFields(BaseModel):
     Trip_Date: str = ""; Destination: str = ""; Departure_Time: str = ""
     Cost: str = ""; VP_Signature: str = ""; Principal_Signature: str = ""
     Accounts_Acknowledged: int = 0
+    Send_Kitchen: int = 0; Send_Household: int = 0
+    Send_IT: int = 0; Send_Maintenance: int = 0
 
 
 class ReqItem(BaseModel):
@@ -559,7 +574,8 @@ _REQ_SET = ("Site=?,Category=?,Maintenance=?,Department=?,Academic=?,Supplier=?,
             "Purpose=?,Requesting=?,HOD_Comment=?,VP_Comment=?,Request_Type=?,Scope=?,"
             "Contractor=?,Material=?,VP_Approval=?,Principal_Comment=?,Maintenance_Unit=?,"
             "Trip_Date=?,Destination=?,Departure_Time=?,Cost=?,VP_Signature=?,"
-            "Principal_Signature=?,Accounts_Acknowledged=?")
+            "Principal_Signature=?,Accounts_Acknowledged=?,"
+            "Send_Kitchen=?,Send_Household=?,Send_IT=?,Send_Maintenance=?")
 
 
 def _req_params(f):
@@ -567,8 +583,8 @@ def _req_params(f):
             f.Purpose, f.Requesting, f.HOD_Comment, f.VP_Comment, f.Request_Type, f.Scope,
             f.Contractor, f.Material, f.VP_Approval, f.Principal_Comment, f.Maintenance_Unit,
             f.Trip_Date, f.Destination, f.Departure_Time, f.Cost, f.VP_Signature,
-            f.Principal_Signature, f.Accounts_Acknowledged)
-
+            f.Principal_Signature, f.Accounts_Acknowledged,
+            f.Send_Kitchen, f.Send_Household, f.Send_IT, f.Send_Maintenance)
 
 def _req_log_history(cur, doc, phase, action, action_by, assigned_to="", comments=""):
     cur.execute("INSERT INTO REQUISITION.REQUISITION_HISTORY "
@@ -716,9 +732,10 @@ def req_save(doc: str, body: SaveReqIn, caller: int = Depends(current_user_id)):
                 "Academic, Supplier, Purpose, Requesting, HOD_Comment, VP_Comment, "
                 "Request_Type, Scope, Contractor, Material, VP_Approval, Principal_Comment, "
                 "Maintenance_Unit, Trip_Date, Destination, Departure_Time, Cost, "
-                "VP_Signature, Principal_Signature, Accounts_Acknowledged, Phase, "
+                "VP_Signature, Principal_Signature, Accounts_Acknowledged, "
+                "Send_Kitchen, Send_Household, Send_IT, Send_Maintenance, Phase, "
                 "Submit_Date, Assign_To) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (name, doc, *_req_params(body.fields), "Draft",
                  date.today().isoformat(), name))
             phase, action = "Draft", "Saved"
@@ -747,18 +764,26 @@ def req_submit(doc: str, body: SubmitReqIn, caller: int = Depends(current_user_i
         idx = phases.index(current_phase) if current_phase in phases else 0
         if idx + 1 >= len(phases):
             raise HTTPException(409, "Already at the final phase.")
-        next_phase = phases[idx + 1]
+        # VP Review branch: if any department box is ticked, route to those
+        # departments and skip the rest of the approval chain (straight to Completed).
+        any_dept = any(getattr(body.fields, c) for c in (
+            "Send_Kitchen", "Send_Household", "Send_IT", "Send_Maintenance"))
+        if current_phase == "VP Review" and any_dept:
+            next_phase = "Completed"
+        else:
+            next_phase = phases[idx + 1]
         approver_col = APPROVER_PHASE_COLUMN.get(current_phase)
         extra = f",{approver_col}=?" if approver_col else ""
         extra_params = (caller,) if approver_col else ()
+        final_assignee = "" if next_phase == "Completed" else body.assignee
         cur.execute(
             f"UPDATE REQUISITION.REQUISITION_TABLE SET {_REQ_SET},"
             "Phase=?,Assign_To=?,Submit_Date=?,Complete_Date=?" + extra +
             " WHERE Document_Number=?",
-            (*_req_params(body.fields), next_phase, body.assignee,
+            (*_req_params(body.fields), next_phase, final_assignee,
              date.today().isoformat(), date.today().isoformat(), *extra_params, doc))
         _req_log_history(cur, doc, current_phase, "Submitted", name,
-                         body.assignee, body.comments)
+                         final_assignee, body.comments)
         _req_sync_items(cur, doc, body.items)
         conn.commit()
     return {"next_phase": next_phase}

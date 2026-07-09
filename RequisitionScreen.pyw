@@ -10,6 +10,7 @@ import applog
 from requisition_db import (
     resolve_logged_in_user, user_in_any_group,
     fetch_requisitions, fetch_summary_counts, log_document_open,
+    fetch_by_department,
 )
 
 log = applog.get_logger("requisition")
@@ -94,11 +95,12 @@ class RequisitionScreen(tk.Tk):
         outer = tk.Frame(self, bg="#f5f5f0")
         outer.grid(row=0, column=0, sticky="NSEW", padx=10, pady=10)
         outer.columnconfigure(0, weight=1)
-        outer.rowconfigure(3, weight=1)
+        outer.rowconfigure(4, weight=1)
 
         self._build_header(outer)
         self._build_stats_bar(outer)
         self._build_toolbar(outer)
+        self._build_department_bar(outer)
         self._build_table(outer)
         self._build_footer(outer)
 
@@ -190,8 +192,8 @@ class RequisitionScreen(tk.Tk):
                 relief="flat", bd=0,
                 padx=12, pady=5, cursor="hand2",
             )
-            self.toggle_all.grid(row=0, column=2, padx=(12), pady=8)
-
+            self.toggle_all.grid(row=0, column=2, padx=(12), pady=8)           
+        
         tk.Frame(bar, bg="#ffffff").grid(row=0, column=3, sticky="EW")
         bar.columnconfigure(3, weight=1)
 
@@ -210,14 +212,45 @@ class RequisitionScreen(tk.Tk):
         search_entry.insert(0, "Search requisitions...")
         search_entry.bind("<FocusIn>",  lambda e: self._clear_placeholder(search_entry))
         search_entry.bind("<FocusOut>", lambda e: self._restore_placeholder(search_entry))
+        
+    def _build_department_bar(self, parent):
+        self._active_dept = None
+        self._dept_buttons = {}
+        bar = tk.Frame(parent, bg="#f7f5f2",
+                       highlightthickness=1, highlightbackground="#ddddd5")
+        bar.grid(row=3, column=0, sticky="EW", pady=(0, 1))
+
+        tk.Label(bar, text="Show completed for department:", bg="#f7f5f2",
+                 font=("Segoe UI", 10, "bold"), fg="#555550"
+                 ).pack(side="left", padx=(12, 8), pady=8)
+
+        for label, key in (("Kitchen", "kitchen"), ("Household", "household"),
+                           ("IT", "it"), ("Maintenance", "maintenance")):
+            btn = tk.Button(
+                bar, text=label,
+                command=lambda k=key: self._filter_department(k),
+                bg="#f0eeea", fg="#555550", font=("Segoe UI", 10),
+                relief="flat", bd=0, padx=12, pady=5, cursor="hand2",
+                activebackground="#e0ddd8",
+            )
+            btn.pack(side="left", padx=3, pady=8)
+            self._dept_buttons[key] = btn
+
+        self._all_dept_btn = tk.Button(
+            bar, text="Show All", command=self._clear_department_filter,
+            bg="#1e40af", fg="#ffffff", font=("Segoe UI", 10, "bold"),
+            relief="flat", bd=0, padx=12, pady=5, cursor="hand2",
+            activebackground="#1e3a8a",
+        )
+        self._all_dept_btn.pack(side="left", padx=(10, 3), pady=8)
 
     def _build_table(self, parent):
         frame = tk.Frame(parent, bg="#ffffff",
                          highlightthickness=1, highlightbackground="#ddddd5")
-        frame.grid(row=3, column=0, sticky="NSEW", pady=(0, 1))
+        frame.grid(row=4, column=0, sticky="NSEW", pady=(0, 1))
         frame.columnconfigure(0, weight=1)
         frame.rowconfigure(0, weight=1)
-        parent.rowconfigure(3, weight=1)
+        parent.rowconfigure(4, weight=1)
 
         columns = ("doc_number", "site", "category", "department", "description", "status")
         self.tree = ttk.Treeview(frame, columns=columns, show="headings",
@@ -257,7 +290,7 @@ class RequisitionScreen(tk.Tk):
     def _build_footer(self, parent):
         footer = tk.Frame(parent, bg="#ffffff",
                           highlightthickness=1, highlightbackground="#ddddd5")
-        footer.grid(row=4, column=0, sticky="EW")
+        footer.grid(row=5, column=0, sticky="EW")
         footer.columnconfigure(0, weight=1)
 
         self.row_count_label = tk.Label(
@@ -333,7 +366,7 @@ class RequisitionScreen(tk.Tk):
         if p in ("hod review", "vp review"):    return "review"
         if p in ("vp approval", "principal approval",
              "procurement", "maintenance unit"): return "approved"
-        if p == "accounts":                     return "closed"
+        if p in ("accounts", "completed"):      return "closed"
         return ""
 
     # ── Interactions ──────────────────────────────────────────────────────────
@@ -360,7 +393,32 @@ class RequisitionScreen(tk.Tk):
                 font=active if all_reqs else inactive)
 
         self._load_data()
+        
+    def _filter_department(self, dept):
+        self._active_dept = dept
+        rows = fetch_by_department(dept)
+        self._refresh_table(rows)
+        self._update_dept_button_styles()
 
+    def _clear_department_filter(self):
+        self._active_dept = None
+        self._refresh_table(self._all_rows)
+        self._update_dept_button_styles()
+
+    def _update_dept_button_styles(self):
+        for key, btn in self._dept_buttons.items():
+            if key == self._active_dept:
+                btn.config(bg="#1e40af", fg="#ffffff",
+                           font=("Segoe UI", 10, "bold"))
+            else:
+                btn.config(bg="#f0eeea", fg="#555550",
+                           font=("Segoe UI", 10))
+        # "Show All" is highlighted only when no department is active
+        self._all_dept_btn.config(
+            bg="#1e40af" if self._active_dept is None else "#f0eeea",
+            fg="#ffffff" if self._active_dept is None else "#555550",
+            font=("Segoe UI", 10, "bold"))
+        
     def _on_search(self, *_):
         if not hasattr(self, "tree"):
             return
