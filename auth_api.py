@@ -186,21 +186,7 @@ def list_requisitions(scope: str = "mine", user_id: int = Depends(current_user_i
             cur.execute("SELECT * FROM REQUISITION.REQUISITION_TABLE WHERE Assign_To = ?",
                         (name,))
         return [list(r) for r in cur.fetchall()]
-
-@app.get("/requisitions/by-department/{dept}")
-def list_by_department(dept: str, _: int = Depends(current_user_id)):
-    columns = {"kitchen": "Send_Kitchen", "household": "Send_Household",
-               "it": "Send_IT", "maintenance": "Send_Maintenance"}
-    col = columns.get(dept.lower())
-    if col is None:
-        raise HTTPException(404, "Unknown department.")
-    with get_connection() as conn:
-        cur = conn.cursor()
-        cur.execute(
-            f"SELECT * FROM REQUISITION.REQUISITION_TABLE "
-            f"WHERE {col} = 1 AND Phase = 'Completed'")
-        return [list(r) for r in cur.fetchall()]
-        
+       
 @app.get("/requisitions/summary")
 def summary(user_id: int = Depends(current_user_id)):
     with get_connection() as conn:
@@ -549,7 +535,7 @@ class ReqFields(BaseModel):
     Accounts_Acknowledged: int = 0
     Send_Kitchen: int = 0; Send_Household: int = 0
     Send_IT: int = 0; Send_Maintenance: int = 0
-
+    Processed_Refs: str = ""
 
 class ReqItem(BaseModel):
     Item_Name: str = ""; Amt_In_Stock: str = ""; Quantity_Requested: str = ""
@@ -565,17 +551,17 @@ class SaveReqIn(BaseModel):
 class SubmitReqIn(BaseModel):
     fields: ReqFields
     items: list[ReqItem] = []
-    assignee: str
-    completed_phase: str
+    assignee: str = ""
+    completed_phase: str = ""
     comments: str = ""
-
-
+    next_phase: str = ""
+    
 _REQ_SET = ("Site=?,Category=?,Maintenance=?,Department=?,Academic=?,Supplier=?,"
             "Purpose=?,Requesting=?,HOD_Comment=?,VP_Comment=?,Request_Type=?,Scope=?,"
             "Contractor=?,Material=?,VP_Approval=?,Principal_Comment=?,Maintenance_Unit=?,"
             "Trip_Date=?,Destination=?,Departure_Time=?,Cost=?,VP_Signature=?,"
             "Principal_Signature=?,Accounts_Acknowledged=?,"
-            "Send_Kitchen=?,Send_Household=?,Send_IT=?,Send_Maintenance=?")
+            "Send_Kitchen=?,Send_Household=?,Send_IT=?,Send_Maintenance=?,Processed_Refs=?")
 
 
 def _req_params(f):
@@ -584,7 +570,8 @@ def _req_params(f):
             f.Contractor, f.Material, f.VP_Approval, f.Principal_Comment, f.Maintenance_Unit,
             f.Trip_Date, f.Destination, f.Departure_Time, f.Cost, f.VP_Signature,
             f.Principal_Signature, f.Accounts_Acknowledged,
-            f.Send_Kitchen, f.Send_Household, f.Send_IT, f.Send_Maintenance)
+            f.Send_Kitchen, f.Send_Household, f.Send_IT, f.Send_Maintenance,
+            f.Processed_Refs)
 
 def _req_log_history(cur, doc, phase, action, action_by, assigned_to="", comments=""):
     cur.execute("INSERT INTO REQUISITION.REQUISITION_HISTORY "
@@ -688,30 +675,46 @@ def req_history(doc: str, _: int = Depends(current_user_id)):
         return [list(r) for r in cur.fetchall()]
 
 
-@app.get("/requisitions/{doc}/approvers")
-def req_approvers(doc: str, _: int = Depends(current_user_id)):
-    result = {"hod": None, "vp": None, "principal": None}
+_DEPT_SEND = {"kitchen": "Send_Kitchen", "household": "Send_Household",
+              "it": "Send_IT", "maintenance": "Send_Maintenance"}
+_DEPT_PROCESSED = {"kitchen": "Processed_Kitchen", "household": "Processed_Household",
+                   "it": "Processed_IT", "maintenance": "Processed_Maintenance"}
+
+
+@app.get("/requisitions/by-department/{dept}")
+def list_by_department(dept: str, _: int = Depends(current_user_id)):
+    send_col = _DEPT_SEND.get(dept.lower())
+    proc_col = _DEPT_PROCESSED.get(dept.lower())
+    if send_col is None:
+        raise HTTPException(404, "Unknown department.")
     with get_connection() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT HOD_Approver_ID, VP_Approver_ID, Principal_Approver_ID "
-                    "FROM REQUISITION.REQUISITION_TABLE WHERE Document_Number = ?", (doc,))
-        row = cur.fetchone()
-        if not row:
-            return result
-        for key, uid in zip(("hod", "vp", "principal"), (row[0], row[1], row[2])):
-            if not uid:
-                continue
-            cur.execute("SELECT FirstName + ' ' + LastName FROM Administration.Users "
-                        "WHERE UserID = ?", (uid,))
-            nrow = cur.fetchone()
-            cur.execute("SELECT SignatureData FROM Administration.UserSignatures "
-                        "WHERE UserID = ?", (uid,))
-            srow = cur.fetchone()
-            img = (base64.b64encode(bytes(srow[0])).decode("ascii")
-                   if srow and srow[0] is not None else None)
-            result[key] = {"name": nrow[0] if nrow else "", "image": img}
-    return result
+        cur.execute(
+            f"SELECT * FROM REQUISITION.REQUISITION_TABLE "
+            f"WHERE {send_col} = 1 AND Phase = 'Completed' AND {proc_col} = 0")
+        return [list(r) for r in cur.fetchall()]
+        
+class ProcessReqIn(BaseModel):
+    department: str
+    doc_numbers: list[str] = []
 
+
+@app.post("/requisitions/mark-processed")
+def mark_processed(body: ProcessReqIn, _: int = Depends(current_user_id)):
+    proc_col = _DEPT_PROCESSED.get(body.department.lower())
+    if proc_col is None:
+        raise HTTPException(404, "Unknown department.")
+    if not body.doc_numbers:
+        return {"updated": 0}
+    with get_connection() as conn:
+        cur = conn.cursor()
+        placeholders = ",".join("?" for _ in body.doc_numbers)
+        cur.execute(
+            f"UPDATE REQUISITION.REQUISITION_TABLE SET {proc_col} = 1 "
+            f"WHERE Document_Number IN ({placeholders})",
+            tuple(body.doc_numbers))
+        conn.commit()
+        return {"updated": cur.rowcount}
 
 @app.put("/requisitions/{doc}")
 def req_save(doc: str, body: SaveReqIn, caller: int = Depends(current_user_id)):
@@ -733,9 +736,9 @@ def req_save(doc: str, body: SaveReqIn, caller: int = Depends(current_user_id)):
                 "Request_Type, Scope, Contractor, Material, VP_Approval, Principal_Comment, "
                 "Maintenance_Unit, Trip_Date, Destination, Departure_Time, Cost, "
                 "VP_Signature, Principal_Signature, Accounts_Acknowledged, "
-                "Send_Kitchen, Send_Household, Send_IT, Send_Maintenance, Phase, "
+                "Send_Kitchen, Send_Household, Send_IT, Send_Maintenance, Processed_Refs, Phase, "
                 "Submit_Date, Assign_To) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (name, doc, *_req_params(body.fields), "Draft",
                  date.today().isoformat(), name))
             phase, action = "Draft", "Saved"
@@ -764,14 +767,14 @@ def req_submit(doc: str, body: SubmitReqIn, caller: int = Depends(current_user_i
         idx = phases.index(current_phase) if current_phase in phases else 0
         if idx + 1 >= len(phases):
             raise HTTPException(409, "Already at the final phase.")
-        # VP Review branch: if any department box is ticked, route to those
-        # departments and skip the rest of the approval chain (straight to Completed).
-        any_dept = any(getattr(body.fields, c) for c in (
-            "Send_Kitchen", "Send_Household", "Send_IT", "Send_Maintenance"))
-        if current_phase == "VP Review" and any_dept:
-            next_phase = "Completed"
-        else:
-            next_phase = phases[idx + 1]
+        natural_next = phases[idx + 1]
+        allowed = [natural_next]
+        if current_phase == "VP Review":
+            allowed.append("Completed")
+        requested = (body.next_phase or "").strip()
+        next_phase = requested if requested in allowed else natural_next    
+        
+        
         approver_col = APPROVER_PHASE_COLUMN.get(current_phase)
         extra = f",{approver_col}=?" if approver_col else ""
         extra_params = (caller,) if approver_col else ()

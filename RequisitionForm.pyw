@@ -12,6 +12,7 @@ from reqform_db import (
     fetch_requisition, fetch_items, fetch_history, fetch_attachments,
     fetch_approvers, save_requisition, submit_requisition,
     upload_attachment, delete_attachment, download_attachment,
+    fetch_unprocessed_for_department, mark_requisitions_processed,
 )
 
 # ---------------------------------------------
@@ -415,6 +416,7 @@ class RequisitionForm(tk.Tk):
 
         (self.current_user_id, user_name,
          doc_number, req_row, assigned_to) = load_session()
+        self._is_new = not bool(req_row)
         self.current_user_name = user_name or ""
         if user_name:
             self.logon_user_var.set(f"  {user_name}  ")
@@ -607,7 +609,41 @@ class RequisitionForm(tk.Tk):
         self.academic_entry.grid(row=2, column=1, columnspan=3, sticky="ew", pady=6)
         self.academic_label.grid_remove()
         self.academic_entry.grid_remove()
-
+        
+        # Requisition Processed — shown for new requisitions in a routed dept
+        self.processed_frame = tk.Frame(info, bg=C_PANEL)
+        self.processed_frame.grid(row=8, column=0, columnspan=6,
+                                  sticky="ew", pady=(4, 6))
+        make_label(self.processed_frame, "Requisition Processed", bg=C_PANEL).pack(
+            anchor="w")
+        list_wrap = tk.Frame(self.processed_frame, bg=C_PANEL)
+        list_wrap.pack(fill="x")
+        self.processed_listbox = tk.Listbox(
+            list_wrap, selectmode="extended", height=4,
+            font=FONT_ENTRY, exportselection=False,
+            bg="#ffffff", relief="solid", bd=1, highlightthickness=0)
+        self.processed_listbox.pack(side="left", fill="x", expand=True)
+        proc_sb = ttk.Scrollbar(list_wrap, orient="vertical",
+                                command=self.processed_listbox.yview)
+        proc_sb.pack(side="right", fill="y")
+        self.processed_listbox.config(yscrollcommand=proc_sb.set)
+        self._processed_docs = []
+        self.processed_frame.grid_remove()   # hidden until a routed dept is picked
+        
+        # Processed References — its own frame, shown on any requisition that
+        # has references, independent of the selector listbox.
+        self.refs_frame = tk.Frame(info, bg=C_PANEL)
+        self.refs_frame.grid(row=9, column=0, columnspan=6, sticky="ew", pady=(4, 6))
+        self.processed_refs_var = tk.StringVar()
+        make_label(self.refs_frame, "Processed References", bg=C_PANEL).pack(
+            anchor="w", pady=(6, 0))
+        self.processed_refs_entry = tk.Entry(
+            self.refs_frame,
+            textvariable=self.processed_refs_var, font=FONT_ENTRY,
+            state="readonly", readonlybackground="#F0F0F0", relief="solid", bd=1)
+        self.processed_refs_entry.pack(fill="x", pady=(0, 4))
+        self.refs_frame.grid_remove()   # shown only when there are references
+        
         # Trip fields (shown when Category is in TRIP_CATEGORIES)
         self.tripDate_label = make_label(info, "Date of Trip", bg=C_PANEL)
         self.tripDate_label.grid(row=6, column=0, sticky="e", padx=(0, 6), pady=6)
@@ -949,7 +985,12 @@ class RequisitionForm(tk.Tk):
         self.send_household_var.set(bool(safe("Send_Household")))
         self.send_it_var.set(bool(safe("Send_IT")))
         self.send_maintenance_var.set(bool(safe("Send_Maintenance")))
-
+        refs = safe("Processed_Refs")
+        self.processed_refs_var.set(refs)
+        if refs:
+            self.refs_frame.grid()
+        else:
+            self.refs_frame.grid_remove()
         if safe("Category") == "Infrastructure":
             self.maintenance_label.grid()
             self.maintenance_entry.grid()
@@ -1212,18 +1253,45 @@ class RequisitionForm(tk.Tk):
         self._assign_doc_number()
         self._refresh_tracker()
 
+    DEPT_WITH_PROCESSING = {"Kitchen": "kitchen", "Household": "household",
+                            "IT": "it", "Maintenance": "maintenance"}
+
     def _on_department_selected(self, event=None):
-        if self.dept_entry.get() == "Academic":
+        dept = self.dept_entry.get()
+        if dept == "Academic":
             self.academic_label.grid()
             self.academic_entry.grid()
         else:
             self.academic_entry.set("")
             self.academic_label.grid_remove()
             self.academic_entry.grid_remove()
+        self._refresh_processed_listbox(dept)
+
+    def _refresh_processed_listbox(self, dept):
+        # Only for new requisitions in one of the four routed departments.
+        key = self.DEPT_WITH_PROCESSING.get(dept)        
+        if key is None or not self._is_new_requisition():
+            self.processed_frame.grid_remove()
+            return
+        rows = fetch_unprocessed_for_department(key)
+        self.processed_listbox.delete(0, tk.END)
+        self._processed_docs = []          # doc number per listbox index
+        for r in rows:
+            doc = r[2] if len(r) > 2 else ""
+            desc = (r[15] if len(r) > 15 else "") or (r[3] if len(r) > 3 else "")
+            self._processed_listbox_add(doc, desc)
+        self.processed_frame.grid()
+
+    def _processed_listbox_add(self, doc, desc):
+        self._processed_docs.append(doc)
+        self.processed_listbox.insert(tk.END, f"{doc}  —  {desc}")
 
     def _on_maintenance_toggle(self):
         self._refresh_tracker()
         self._update_tab_visibility()
+    
+    def _is_new_requisition(self):
+        return getattr(self, "_is_new", True)
 
     def _refresh_tracker(self):
         build_phase_tracker(
@@ -1473,6 +1541,7 @@ class RequisitionForm(tk.Tk):
             "Send_Household":   1 if self.send_household_var.get() else 0,
             "Send_IT":          1 if self.send_it_var.get() else 0,
             "Send_Maintenance": 1 if self.send_maintenance_var.get() else 0,
+            "Processed_Refs": self.processed_refs_var.get(),
         }
 
     # -- Signatures & PDF ------------------------------------------------------
@@ -1548,6 +1617,21 @@ class RequisitionForm(tk.Tk):
         except requests.RequestException as exc:
             messagebox.showerror("Database Error", str(exc))
             return
+        # Commit "processed" marks for requisitions selected in the department
+        # listbox — only after the save itself succeeded.
+        dept = self.dept_entry.get()
+        key = self.DEPT_WITH_PROCESSING.get(dept)
+        if key and getattr(self, "_processed_docs", None):
+            selected = [self._processed_docs[i]
+                        for i in self.processed_listbox.curselection()]
+            if selected:
+                mark_requisitions_processed(key, selected)
+        if getattr(self, "_processed_docs", None):
+            chosen = [self._processed_docs[i]
+                      for i in self.processed_listbox.curselection()]
+            self.processed_refs_var.set(", ".join(chosen))
+            if chosen:
+                self.refs_frame.grid()
         self.status_var.set("Saved.")
         messagebox.showinfo("Saved", "Requisition saved.")
         self.after(300, self._reload_phase_from_db)
@@ -1568,19 +1652,12 @@ class RequisitionForm(tk.Tk):
                 "Complete", "This requisition has already reached the final phase.")
             return
 
-        # Branch: at VP Review, if any department box is ticked, the requisition
-        # is routed to those departments and skips the rest of the approval chain.
-        any_dept = any(v.get() for v in (
-            self.send_kitchen_var, self.send_household_var,
-            self.send_it_var, self.send_maintenance_var))
-        if self.current_phase == "VP Review" and any_dept:
-            next_phase = "Completed"
-        else:
-            next_phase = phases[current_idx + 1]
-
-        # Completed is terminal — no assignee is chosen.
-        completing = (next_phase == "Completed")
-        user_list  = fetch_users() if not completing else []
+        natural_next = phases[current_idx + 1]
+        # At VP Review, the submitter chooses whether to continue the normal
+        # approval chain or route straight to Completed. Elsewhere there's no choice.
+        vp_choice = (self.current_phase == "VP Review")
+        phase_options = [natural_next, "Completed"] if vp_choice else [natural_next]
+        next_phase = natural_next   # default; may be changed by the selector below            
 
         win = tk.Toplevel(self)
         win.title("Submit Requisition")
@@ -1606,27 +1683,34 @@ class RequisitionForm(tk.Tk):
             widget.grid(row=r, column=1, sticky="ew", padx=(12, 0), pady=6)
 
         phase_var = tk.StringVar(value=next_phase)
-        frow("Next Phase",
-             tk.Entry(body, textvariable=phase_var, font=FONT_ENTRY,
-                      state="readonly", bg="#F0F0F0", relief="flat", bd=4), 0)
+        if vp_choice:
+            phase_combo = ttk.Combobox(body, textvariable=phase_var,
+                                       values=phase_options, state="readonly",
+                                       font=FONT_ENTRY)
+            frow("Next Phase", phase_combo, 0)
+        else:
+            frow("Next Phase",
+                 tk.Entry(body, textvariable=phase_var, font=FONT_ENTRY,
+                          state="readonly", bg="#F0F0F0", relief="flat", bd=4), 0)
         frow("Date Assigned",
              tk.Entry(body, textvariable=tk.StringVar(value=str(self.today)),
                       font=FONT_ENTRY, state="readonly",
                       bg="#F0F0F0", relief="flat", bd=4), 1)
-        if completing:
-            assignee_combo = None
-            tk.Label(body, text="(No assignee — this completes the requisition)",
-                     font=FONT_CAPTION, bg=C_BG, fg=C_TEXT_MUTED).grid(
-                row=2, column=0, columnspan=2, sticky="w", pady=6)
-        else:
-            assignee_combo = ttk.Combobox(body, values=user_list,
-                                          state="readonly", font=FONT_ENTRY)
-            frow("Assigned To", assignee_combo, 2)
+                      
+        assignee_combo = ttk.Combobox(body, values=fetch_users(),
+                                      state="readonly", font=FONT_ENTRY)
+        frow("Assigned To", assignee_combo, 2)
+        assignee_hint = tk.Label(
+            body, text="(Not needed if Next Phase is Completed)",
+            font=FONT_CAPTION, bg=C_BG, fg=C_TEXT_MUTED)
+        assignee_hint.grid(row=3, column=0, columnspan=2, sticky="w", pady=(0, 6))
 
         bf = tk.Frame(win, bg=C_BG, padx=28, pady=10)
         bf.pack(fill="x")
 
         def do_submit():
+            chosen_phase = phase_var.get()
+            completing = (chosen_phase == "Completed")
             if not completing and not assignee_combo.get():
                 messagebox.showwarning("Required", "Please select an assignee.")
                 return
@@ -1635,7 +1719,8 @@ class RequisitionForm(tk.Tk):
                 submit_requisition(
                     doc_number, self._build_fields(), self._collect_items(),
                     assignee, self.current_phase,
-                    comments=st_get(self.HODcomment_entry))
+                    comments=st_get(self.HODcomment_entry),
+                    next_phase=chosen_phase)
             except requests.HTTPError as exc:
                 # 403 = not your assignment, 409 = phase changed / already final
                 detail = (exc.response.json().get("detail")

@@ -129,17 +129,33 @@ def fetch_approvers(doc):
         result[key] = info
     return result
 
+def fetch_unprocessed_for_department(dept):
+    try:
+        return _get(f"/requisitions/by-department/{dept}")
+    except requests.RequestException as exc:
+        log.error("fetch_unprocessed_for_department failed: %s", exc)
+        return []
+
+
+def mark_requisitions_processed(department, doc_numbers):
+    try:
+        return _send("POST", "/requisitions/mark-processed",
+                     json={"department": department, "doc_numbers": doc_numbers})
+    except requests.RequestException as exc:
+        log.error("mark_requisitions_processed failed: %s", exc)
+        return {"updated": 0}
 
 # ── Writes ──
 def save_requisition(doc, fields, items):
     _send("PUT", f"/requisitions/{doc}", json={"fields": fields, "items": items})
 
 
-def submit_requisition(doc, fields, items, assignee, completed_phase, comments=""):
+def submit_requisition(doc, fields, items, assignee, completed_phase,
+                       comments="", next_phase=""):
     return _send("POST", f"/requisitions/{doc}/submit",
                  json={"fields": fields, "items": items, "assignee": assignee,
-                       "completed_phase": completed_phase, "comments": comments})
-
+                       "completed_phase": completed_phase, "comments": comments,
+                       "next_phase": next_phase})
 
 # ── Attachments ──
 def upload_attachment(doc, file_path):
