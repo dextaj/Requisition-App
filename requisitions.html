@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Requisitions — Church Teachers College</title>
+  <style>
+    body { font-family: 'Segoe UI', Verdana, sans-serif; background: #F7F3EE;
+           margin: 0; color: #1C1917; }
+    header { background: #1A2B4A; color: #fff; padding: 16px 24px;
+             display: flex; align-items: center; justify-content: space-between;
+             border-bottom: 3px solid #C8A96E; }
+    header h1 { font-size: 18px; margin: 0; }
+    header .user { font-size: 13px; color: #94A3B8; }
+    .bar { padding: 14px 24px; display: flex; gap: 8px; align-items: center; }
+    .bar button { padding: 8px 14px; border: none; border-radius: 4px;
+                  font-size: 13px; font-weight: bold; cursor: pointer;
+                  background: #f0eeea; color: #555550; }
+    .bar button.active { background: #1e40af; color: #fff; }
+    .bar .spacer { flex: 1; }
+    .bar input { padding: 8px; border: 1px solid #D8D0C8; border-radius: 4px;
+                 font-size: 13px; width: 200px; }
+    table { width: calc(100% - 48px); margin: 0 24px 24px; border-collapse: collapse;
+            background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
+    th { background: #1A2B4A; color: #fff; text-align: left; padding: 10px 12px;
+         font-size: 12px; cursor: pointer; }
+    td { padding: 10px 12px; border-bottom: 1px solid #eee; font-size: 13px; }
+    tr:hover td { background: #f9fafb; }
+    .phase { padding: 3px 8px; border-radius: 10px; font-size: 11px; font-weight: bold; }
+    .msg { padding: 24px; color: #78716C; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Requisition Management</h1>
+    <span class="user" id="userLabel"></span>
+  </header>
+
+  <div class="bar">
+    <button onclick="location.href='form.html?new=1'"
+            style="background:#16A34A;color:#fff">+ New Requisition</button>
+    <button id="btnMine" class="active" onclick="setScope('mine')">Mine</button>
+    <button id="btnAll" onclick="setScope('all')" style="display:none">All</button>
+    <div class="spacer"></div>
+    <input type="text" id="search" placeholder="Search..." oninput="render()">
+    <button onclick="logout()" style="background:#DC2626;color:#fff">Sign Out</button>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th onclick="sortBy(2)">Document #</th>
+        <th onclick="sortBy(3)">Site</th>
+        <th onclick="sortBy(4)">Category</th>
+        <th onclick="sortBy(6)">Department</th>
+        <th onclick="sortBy(15)">Purpose</th>
+        <th onclick="sortBy(10)">Phase</th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <div class="msg" id="msg"></div>
+
+  <script>
+    const API_BASE = "http://localhost:8000";
+    const token = localStorage.getItem("ctc_token");
+
+    // Not logged in? Go back to login.
+    if (!token) { window.location.href = "login.html"; }
+
+    let allRows = [];
+    let scope = "mine";
+    let sortCol = 2, sortAsc = true;
+
+    // Helper: authenticated fetch
+    async function apiGet(path) {
+      const res = await fetch(`${API_BASE}${path}`, {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (res.status === 401) { window.location.href = "login.html"; return null; }
+      if (!res.ok) throw new Error(`Request failed (${res.status})`);
+      return res.json();
+    }
+
+    async function load() {
+      const msg = document.getElementById("msg");
+      msg.textContent = "Loading...";
+      try {
+        // Who am I? (shows name; reveals All button for VP/Principal later)
+        const me = await apiGet("/auth/me");
+        if (me) document.getElementById("userLabel").textContent = me.full_name || "";
+
+        allRows = await apiGet(`/requisitions?scope=${scope}`) || [];
+        msg.textContent = allRows.length ? "" : "No requisitions found.";
+        render();
+      } catch (err) {
+        msg.textContent = "Error loading requisitions: " + err.message;
+      }
+    }
+
+    function phaseColor(phase) {
+      const p = (phase || "").toLowerCase();
+      if (p === "draft") return "background:#fffbeb;color:#92400e";
+      if (p.includes("review")) return "background:#eff6ff;color:#1e3a8a";
+      if (p === "accounts" || p === "completed") return "background:#f9fafb;color:#6b7280";
+      return "background:#f0fdf4;color:#14532d";
+    }
+
+    function render() {
+      const q = document.getElementById("search").value.toLowerCase();
+      let rows = allRows.filter(r =>
+        !q || [2,3,4,6,15,10].some(i => String(r[i] || "").toLowerCase().includes(q)));
+      rows.sort((a, b) => {
+        const av = String(a[sortCol] || ""), bv = String(b[sortCol] || "");
+        return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
+      });
+      const tbody = document.getElementById("rows");
+      tbody.innerHTML = "";
+      for (const r of rows) {
+        const tr = document.createElement("tr");
+        tr.style.cursor = "pointer";
+        tr.onclick = () => { window.location.href = `form.html?doc=${encodeURIComponent(r[2])}`; };
+        tr.innerHTML = `
+          <td>${esc(r[2])}</td><td>${esc(r[3])}</td><td>${esc(r[4])}</td>
+          <td>${esc(r[6])}</td><td>${esc(r[15])}</td>
+          <td><span class="phase" style="${phaseColor(r[10])}">${esc(r[10])}</span></td>`;
+        tbody.appendChild(tr);
+      }
+    }
+
+    function esc(s) {
+      return String(s ?? "").replace(/[&<>"]/g, c =>
+        ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
+    }
+
+    function setScope(s) {
+      scope = s;
+      document.getElementById("btnMine").classList.toggle("active", s === "mine");
+      document.getElementById("btnAll").classList.toggle("active", s === "all");
+      load();
+    }
+    function sortBy(col) {
+      if (sortCol === col) sortAsc = !sortAsc; else { sortCol = col; sortAsc = true; }
+      render();
+    }
+    function logout() {
+      localStorage.removeItem("ctc_token");
+      window.location.href = "login.html";
+    }
+
+    load();
+  </script>
+</body>
+</html>

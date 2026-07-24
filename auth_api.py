@@ -18,6 +18,16 @@ from pydantic import BaseModel
 
 app = FastAPI()
 
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 ADMIN_GROUP = "Administration"
 VIEW_ALL_GROUPS = ("VP", "Principal")
 
@@ -758,7 +768,8 @@ def req_submit(doc: str, body: SubmitReqIn, caller: int = Depends(current_user_i
         row = cur.fetchone()
         if row is None:
             raise HTTPException(404, "Save the requisition before submitting.")
-        current_phase, assign_to, category, maint = row[0], row[1], row[2], bool(row[3])
+        current_phase, assign_to, category = row[0], row[1], row[2]
+        maint = bool(body.fields.Maintenance_Unit)
         if (assign_to or "").strip() != (name or "").strip():
             raise HTTPException(403, "This requisition is not assigned to you.")
         if body.completed_phase != current_phase:
