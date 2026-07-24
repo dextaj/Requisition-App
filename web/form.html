@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Requisition — Church Teachers College</title>
+  <style>
+    body { font-family: 'Segoe UI', Verdana, sans-serif; background: #F7F3EE;
+           margin: 0; color: #1C1917; }
+    header { background: #1A2B4A; color: #fff; padding: 16px 24px;
+             display: flex; align-items: center; justify-content: space-between;
+             border-bottom: 3px solid #C8A96E; }
+    header h1 { font-size: 18px; margin: 0; }
+    header a { color: #C8A96E; font-size: 13px; text-decoration: none; }
+    .wrap { max-width: 900px; margin: 24px auto; padding: 0 24px; }
+    .card { background: #fff; border: 1px solid #D8D0C8; border-radius: 6px;
+            margin-bottom: 20px; overflow: hidden; }
+    .card h2 { font-size: 14px; color: #1A2B4A; margin: 0;
+               padding: 10px 16px; border-bottom: 2px solid #C8A96E;
+               display: flex; justify-content: space-between; align-items: center; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; padding: 16px; }
+    .field { display: flex; flex-direction: column; }
+    .field.full { grid-column: 1 / -1; }
+    label { font-size: 12px; font-weight: bold; color: #78716C; margin-bottom: 4px; }
+    input, select, textarea {
+      font-size: 14px; padding: 8px; border: 1px solid #D8D0C8;
+      border-radius: 4px; font-family: inherit; box-sizing: border-box; width: 100%; }
+    textarea { min-height: 60px; resize: vertical; }
+    .phase { display: inline-block; padding: 4px 12px; border-radius: 12px;
+             font-size: 13px; font-weight: bold; }
+    .actions { position: sticky; bottom: 0; background: #fff; padding: 14px 24px;
+               border-top: 1px solid #D8D0C8; display: flex; gap: 10px;
+               justify-content: flex-end; }
+    .actions button { padding: 10px 20px; border: none; border-radius: 4px;
+                      font-size: 14px; font-weight: bold; cursor: pointer; }
+    .btn-save { background: #2563EB; color: #fff; }
+    .btn-back { background: #f0eeea; color: #555550; }
+    .btn-submit { background: #16A34A; color: #fff; }
+    .msg { padding: 12px 24px; font-size: 13px; min-height: 18px; }
+    .ok { color: #16A34A; } .error { color: #DC2626; }
+    
+    .tracker { display: flex; align-items: flex-start; justify-content: center;
+               padding: 18px 16px 14px; border-bottom: 1px solid #eee;
+               overflow-x: auto; }
+    .tracker-step { display: flex; flex-direction: column; align-items: center;
+                    flex: 0 0 auto; position: relative; }
+    .tracker-circle { width: 38px; height: 38px; border-radius: 50%;
+                      display: flex; align-items: center; justify-content: center;
+                      font-weight: bold; font-size: 14px; border: 2px solid;
+                      z-index: 1; background: #fff; }
+    .tracker-label { font-size: 11px; text-align: center; margin-top: 6px;
+                     width: 78px; line-height: 1.2; }
+    .tracker-line { flex: 0 0 40px; height: 2px; margin-top: 19px; }
+    /* States */
+    .step-done .tracker-circle { background: #16A34A; border-color: #16A34A; color: #fff; }
+    .step-done .tracker-label { color: #16A34A; }
+    .step-current .tracker-circle { background: #1A2B4A; border-color: #C8A96E; color: #fff;
+                                    box-shadow: 0 0 0 4px rgba(200,169,110,0.3); }
+    .step-current .tracker-label { color: #1A2B4A; font-weight: bold; }
+    .step-todo .tracker-circle { background: #F0F0F0; border-color: #D8D0C8; color: #A8A29E; }
+    .step-todo .tracker-label { color: #A8A29E; }
+    .line-done { background: #16A34A; }
+    .line-todo { background: #D8D0C8; }
+  </style>
+</head>
+<body>
+  <header>
+    <div style="display:flex;align-items:center;gap:12px">
+      <img src="assets/image.png" alt="Church Teachers College" style="height:40px">
+      <h1>Requisition</h1>
+    </div>
+    <a href="requisitions.html">&larr; Back to list</a>
+  </header>
+  <div class="wrap" id="content"><div class="msg">Loading...</div></div>
+
+  <script>
+    const API_BASE = "http://localhost:8000";
+    const token = localStorage.getItem("ctc_token");
+    if (!token) { window.location.href = "login.html"; }
+
+    const params = new URLSearchParams(window.location.search);
+    const doc = params.get("doc");
+    const isNew = params.get("new") === "1";
+    const PHASES_STANDARD    = ["Draft","HOD Review","VP Review",
+                                "Principal Approval","Procurement","Accounts","Completed"];
+    const PHASES_MAINTENANCE = ["Draft","HOD Review","VP Review","Maintenance Unit",
+                                "VP Approval","Principal Approval","Procurement","Accounts","Completed"];
+    const PHASES_TRANSPORT   = ["Draft","HOD Review","VP Approval","Accounts","Completed"];
+    function getPhases(category, viaMaintenance) {
+      if (category === "Transport") return PHASES_TRANSPORT;
+      return viaMaintenance ? PHASES_MAINTENANCE : PHASES_STANDARD;
+    }
+    
+    let loaded = {};      // the full requisition as loaded (all fields preserved)
+    let lists = {};       // dropdown options
+    let loadedItems = [];
+
+    async function api(path, opts = {}) {
+      const res = await fetch(`${API_BASE}${path}`, {
+        ...opts,
+        headers: { "Authorization": `Bearer ${token}`,
+                   "Content-Type": "application/json", ...(opts.headers || {}) }
+      });
+      if (res.status === 401) { window.location.href = "login.html"; return null; }
+      if (!res.ok) throw new Error(`Request failed (${res.status})`);
+      return res.status === 204 ? null : res.json();
+    }
+
+    function esc(s) {
+      return String(s ?? "").replace(/[&<>"]/g, c =>
+        ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
+    }
+    function phaseColor(p) {
+      p = (p || "").toLowerCase();
+      if (p === "draft") return "background:#fffbeb;color:#92400e";
+      if (p.includes("review")) return "background:#eff6ff;color:#1e3a8a";
+      if (p === "accounts" || p === "completed") return "background:#f9fafb;color:#6b7280";
+      return "background:#f0fdf4;color:#14532d";
+    }
+
+    // Build a <select> with options from a list, current value selected
+    function selectField(id, label, options, value, full) {
+      const opts = ['<option value=""></option>']
+        .concat((options || []).map(o =>
+          `<option value="${esc(o)}"${o === value ? " selected" : ""}>${esc(o)}</option>`))
+        .join("");
+      return `<div class="field${full ? ' full' : ''}"><label>${label}</label>
+              <select id="${id}">${opts}</select></div>`;
+    }
+    function inputField(id, label, value, full) {
+      return `<div class="field${full ? ' full' : ''}"><label>${label}</label>
+              <input id="${id}" value="${esc(value)}"></div>`;
+    }
+    function textField(id, label, value) {
+      return `<div class="field full"><label>${label}</label>
+              <textarea id="${id}">${esc(value)}</textarea></div>`;
+    }
+
+    async function load() {
+      try {
+        lists = await api("/lists") || {};
+
+        if (isNew) {
+          // Blank Draft requisition
+          const me = await api("/auth/me");
+          loaded = {
+            Document_Number: "", Phase: "Draft",
+            Created_By: (me && me.full_name) || "",
+            Site: "", Category: "", Department: "", Supplier: "", Cost: "",
+            Purpose: "", Requesting: "", HOD_Comment: "", VP_Comment: "",
+            Principal_Comment: "", VP_Signature: "", Principal_Signature: "",
+            Accounts_Acknowledged: 0, Maintenance_Unit: 0,
+            Send_Kitchen: 0, Send_Household: 0, Send_IT: 0, Send_Maintenance: 0,
+            Processed_Refs: ""
+          };
+          loadedItems = [];
+          render();
+          return;
+        }
+
+        if (!doc) {
+          document.getElementById("content").innerHTML =
+            '<div class="msg error">No document specified.</div>';
+          return;
+        }
+        loaded = await api(`/requisitions/${encodeURIComponent(doc)}`);
+        if (!loaded) { document.getElementById("content").innerHTML =
+          '<div class="msg error">Requisition not found.</div>'; return; }
+        loadedItems = await api(`/requisitions/${encodeURIComponent(doc)}/items`) || [];
+        loadedItems.forEach(it => {
+          it.Broiler = it.Broiler ? 1 : 0; it.Layer = it.Layer ? 1 : 0;
+          it.Pigs = it.Pigs ? 1 : 0; it.Gen_Supply = it.Gen_Supply ? 1 : 0;
+        });
+        render();
+      } catch (err) {
+        document.getElementById("content").innerHTML =
+          `<div class="msg error">Error: ${esc(err.message)}</div>`;
+      }
+    }
+    // Mirrors the desktop _update_field_editability rules.
+    // Returns {editable: bool, show: bool} for a given field at the current phase.
+    function fieldRule(name, phase) {
+      const isDraft = (phase === "" || phase === "Draft");
+      const E = (editable, show = true) => ({ editable, show });
+
+      switch (name) {
+        // Details fields — editable only at Draft
+        case "Created_By": case "Supplier": case "Purpose":
+        case "Site": case "Category": case "Department":
+          return E(isDraft);
+
+        case "Requesting":              // Items Requested — editable at Draft
+          return E(isDraft);
+
+        case "HOD_Comment":             // hidden at Draft; editable only at HOD Review
+          return E(phase === "HOD Review", !isDraft);
+
+        case "VP_Comment":              // hidden until past HOD; editable only at VP Review
+          return E(phase === "VP Review",
+                   !["", "Draft", "HOD Review"].includes(phase));
+
+        case "Principal_Comment":       // shown from Principal Approval on; editable there
+          return E(phase === "Principal Approval",
+                   !["", "Draft", "HOD Review", "VP Review",
+                     "Maintenance Unit", "VP Approval"].includes(phase));
+
+        case "Cost":                    // editable except at Accounts (locked there)
+          return E(phase !== "Accounts");
+      
+        case "Accounts_Acknowledged":
+          return E(phase === "Accounts", phase === "Accounts" || phase === "Completed");
+
+        case "Send_Kitchen": case "Send_Household":
+        case "Send_IT": case "Send_Maintenance": {
+          const anySet = loaded.Send_Kitchen == 1 || loaded.Send_Household == 1 ||
+                         loaded.Send_IT == 1 || loaded.Send_Maintenance == 1;
+          return E(phase === "VP Review", phase === "VP Review" || anySet);
+        }
+
+        case "VP_Signature":
+          return E(false,   // read-only display
+                   !["", "Draft", "HOD Review"].includes(phase));
+
+        case "Principal_Signature":
+          return E(false,   // read-only display
+                   !["", "Draft", "HOD Review", "VP Review",
+                     "Maintenance Unit", "VP Approval"].includes(phase));
+        
+        case "Maintenance":   // Maintenance Area — shown for Infrastructure, editable at Draft
+          return E(isDraft, loaded.Category === "Infrastructure");
+
+        case "Trip_Date": case "Destination": case "Departure_Time":
+          return E(isDraft, loaded.Category === "Transport");
+
+        case "Academic":      // shown when Department = Academic
+          return E(isDraft, loaded.Department === "Academic");
+    
+        case "Maintenance_Unit":   // "Route through Maintenance" — editable at VP Review
+          return E(phase === "VP Review",
+                   phase === "VP Review" || loaded.Maintenance_Unit == 1);
+
+        case "Request_Type": case "Scope": case "Contractor": case "Material":
+          // Maintenance fields — shown when routed through maintenance;
+          // editable at the Maintenance Unit phase
+          return E(phase === "Maintenance Unit", loaded.Maintenance_Unit == 1);
+
+        default:
+          return E(false);
+      }
+    }
+    function render() {
+      const r = loaded;
+      const phase = r.Phase || "";
+
+      // Helper: render a field only if shown; disabled if not editable
+      function fld(name, label, kind, options, full) {
+        const rule = fieldRule(name, phase);
+        if (!rule.show) return "";
+        const val = r[name];
+        const dis = rule.editable ? "" : "disabled";
+        const bg = rule.editable ? "" : 'style="background:#F0F0F0"';
+        let inner;
+        if (kind === "select") {
+          const opts = ['<option value=""></option>'].concat(
+            (options || []).map(o =>
+              `<option value="${esc(o)}"${o === val ? " selected" : ""}>${esc(o)}</option>`)
+          ).join("");
+          inner = `<select id="${name}" ${dis} ${bg}>${opts}</select>`;
+        } else if (kind === "textarea") {
+          inner = `<textarea id="${name}" ${dis} ${bg}>${esc(val)}</textarea>`;
+        } else {
+          inner = `<input id="${name}" value="${esc(val)}" ${dis} ${bg}>`;
+        }
+        return `<div class="field${full ? ' full' : ''}"><label>${label}</label>${inner}</div>`;
+      }
+      function chk(name, label) {
+        const rule = fieldRule(name, phase);
+        if (!rule.show) return "";
+        const checked = (r[name] === 1 || r[name] === true) ? "checked" : "";
+        const dis = rule.editable ? "" : "disabled";
+        return `<label style="display:flex;align-items:center;gap:8px;font-size:13px;
+                  font-weight:normal;color:#1C1917;margin:0">
+                  <input type="checkbox" id="${name}" ${checked} ${dis}
+                         style="width:auto;margin:0"> ${label}</label>`;
+      }
+      
+      document.getElementById("content").innerHTML = `
+        <div class="card">
+          ${renderTracker()}
+          <h2>${esc(r.Document_Number || doc)}
+            <span class="phase" style="${phaseColor(phase)}">${esc(phase)}</span>
+          </h2>
+          <div class="grid">            
+            ${fld("Created_By", "Created By", "input")}
+            ${fld("Site", "Site", "select", lists.site)}
+            ${fld("Category", "Category", "select", lists.category)}
+            ${fld("Department", "Department", "select", lists.department)}
+            ${fld("Supplier", "Purchased At", "input")}
+            ${fld("Cost", "Cost", "input")}
+            ${fld("Purpose", "Purpose", "input", null, true)}
+            ${fld("Maintenance", "Maintenance Area", "select", lists.maintenance)}
+            ${fld("Academic", "Academic Department", "select", lists.academic)}
+            ${fld("Trip_Date", "Trip Date", "input")}
+            ${fld("Destination", "Destination", "input")}
+            ${fld("Departure_Time", "Time of Departure", "input")}
+            ${fld("Requesting", "Items Requested", "textarea")}
+            ${fld("HOD_Comment", "HOD Comment", "textarea")}
+            ${fld("VP_Comment", "VP Reviewer Notes", "textarea")}
+            ${fld("Principal_Comment", "Principal Comments", "textarea")}
+            ${fld("VP_Signature", "VP Signature", "input")}
+            ${fld("Principal_Signature", "Principal Signature", "input")}
+            <div class="field full" id="deptSendWrap">
+              <label>Send to Department(s)</label>
+              <div style="display:flex;gap:18px;flex-wrap:wrap;padding:6px 0">
+                ${chk("Send_Kitchen","Kitchen")}
+                ${chk("Send_Household","Household")}
+                ${chk("Send_IT","IT")}
+                ${chk("Send_Maintenance","Maintenance")}
+              </div>
+            </div>
+            <div class="field full">
+              ${chk("Maintenance_Unit", "Route through Maintenance Unit")}
+            </div>
+            <div class="field full">
+              ${chk("Accounts_Acknowledged","Acknowledge receipt of the requisition (Accounts)")}
+            </div>
+          </div>
+        ${(loaded.Maintenance_Unit == 1 &&
+           !["", "Draft", "HOD Review", "VP Review"].includes(loaded.Phase)) ? `
+        <div class="card">
+          <h2>Maintenance</h2>
+          <div class="grid">
+            ${fld("Request_Type", "Request Type", "input")}
+            ${fld("Scope", "Scope", "input")}
+            ${fld("Contractor", "Contractor", "input")}
+            ${fld("Material", "Material", "input")}
+          </div>
+        </div>` : ""}
+        <div class="card">
+          <h2>Items to be Purchased</h2>
+          <div style="padding:16px">
+            <table style="width:100%;border-collapse:collapse;table-layout:fixed">
+              <thead id="itemsHead">${renderItemHead()}</thead>
+              <tbody id="itemsBody">${renderItemRows()}</tbody>
+            </table>
+            <button onclick="addItem()" style="margin-top:10px;background:#f0eeea;color:#555550;
+              border:none;border-radius:4px;padding:8px 14px;font-size:13px;cursor:pointer">
+              + Add Row</button>
+          </div>
+        </div>
+        <div class="msg" id="msg"></div>
+        <div class="actions">
+          <button class="btn-back" onclick="location.href='requisitions.html'">Back</button>
+          <button class="btn-save" onclick="save()">Save</button>
+          <button class="btn-submit" onclick="openSubmit()" id="submitBtn">Submit</button>
+        </div>`;
+      // Disable Submit if already at the final phase
+      const phases = getPhases(loaded.Category, loaded.Maintenance_Unit == 1);
+      const idx = phases.indexOf(loaded.Phase || "");
+      if (idx < 0 || idx + 1 >= phases.length) {
+        const btn = document.getElementById("submitBtn");
+        if (btn) btn.style.display = "none";
+      } 
+      
+        
+      // When Site changes, update loaded.Site and re-render items (farm columns)
+      const siteEl = document.getElementById("Site");
+      if (siteEl) {
+        siteEl.addEventListener("change", () => {
+          loaded.Site = siteEl.value;
+          refreshItems();
+          document.getElementById("itemsHead").innerHTML = renderItemHead();
+        });
+      }
+      // Maintenance routing checkbox: show/hide the maintenance card live
+      const mEl = document.getElementById("Maintenance_Unit");
+      if (mEl) {
+        mEl.addEventListener("change", () => {
+          loaded.Maintenance_Unit = mEl.checked ? 1 : 0;
+          render();
+        });
+      }
+
+      // Category change: generate doc number (new reqs) + show/hide conditional fields
+      const catEl = document.getElementById("Category");
+      if (catEl) {
+        catEl.addEventListener("change", async () => {
+          loaded.Category = catEl.value;
+          if (!loaded.Document_Number && catEl.value) {
+            const res = await api(`/doc-number?category=${encodeURIComponent(catEl.value)}`);
+            if (res && res.doc_number) loaded.Document_Number = res.doc_number;
+          }
+          render();   // re-render to show/hide maintenance area, trip fields
+        });
+      }
+      // Department change: show/hide Academic field
+      const deptEl = document.getElementById("Department");
+      if (deptEl) {
+        deptEl.addEventListener("change", () => {
+          loaded.Department = deptEl.value;
+          render();
+        });
+      }  
+    }
+    // IDs of the inputs we render, mapping to field names
+    const EDITABLE = ["Created_By","Site","Category","Department","Supplier","Cost",
+                      "Purpose","Requesting","HOD_Comment","VP_Comment","Principal_Comment",
+                      "VP_Signature","Principal_Signature",
+                      "Accounts_Acknowledged", "Send_Kitchen","Send_Household","Send_IT",
+                      "Send_Maintenance", "Maintenance","Academic","Trip_Date","Destination","Departure_Time",];
+  
+    function renderItemRows() {
+      const isFarm = (loaded.Site === "Farm");
+      if (!loadedItems.length) {
+        const cols = isFarm ? 9 : 5;
+        return `<tr id="noItemsRow"><td colspan="${cols}" style="padding:8px;color:#78716C;font-size:13px">
+                No items yet.</td></tr>`;
+      }
+      return loadedItems.map((it, i) => {
+        const farmCells = isFarm ? `
+          <td style="padding:4px;text-align:center;width:55px"><input type="checkbox"
+              ${it.Broiler ? "checked" : ""} onchange="updateItemBool(${i},'Broiler',this.checked)"></td>
+          <td style="padding:4px;text-align:center;width:55px"><input type="checkbox"
+              ${it.Layer ? "checked" : ""} onchange="updateItemBool(${i},'Layer',this.checked)"></td>
+          <td style="padding:4px;text-align:center;width:55px"><input type="checkbox"
+              ${it.Pigs ? "checked" : ""} onchange="updateItemBool(${i},'Pigs',this.checked)"></td>
+          <td style="padding:4px;text-align:center;width:65px"><input type="checkbox"
+              ${it.Gen_Supply ? "checked" : ""} onchange="updateItemBool(${i},'Gen_Supply',this.checked)"></td>
+        ` : "";
+        return `
+        <tr>
+          <td style="padding:4px"><input value="${esc(it.Item_Name)}"
+              onchange="updateItem(${i},'Item_Name',this.value)" style="width:100%"></td>
+          <td style="padding:4px"><input value="${esc(it.Amt_In_Stock)}"
+              onchange="updateItem(${i},'Amt_In_Stock',this.value)" style="width:100%"></td>
+          <td style="padding:4px"><input value="${esc(it.Quantity_Requested)}"
+              onchange="updateItem(${i},'Quantity_Requested',this.value)" style="width:100%"></td>
+          <td style="padding:4px"><input value="${esc(it.Comments)}"
+              onchange="updateItem(${i},'Comments',this.value)" style="width:100%"></td>
+          ${farmCells}
+          <td style="padding:4px;text-align:center;width:36px">
+            <button onclick="removeItem(${i})" style="background:#DC2626;color:#fff;border:none;
+              border-radius:4px;width:28px;height:28px;cursor:pointer">✕</button></td>
+        </tr>`;
+      }).join("");
+    }
+    
+    function renderItemHead() {
+      const isFarm = (loaded.Site === "Farm");
+      const th = (t, extra="") => `<th style="text-align:left;padding:6px;border-bottom:2px solid #C8A96E;font-size:12px;${extra}">${t}</th>`;
+      const farmTh = isFarm
+        ? th("Broiler","text-align:center;width:55px") +
+          th("Layer","text-align:center;width:55px") +
+          th("Pigs","text-align:center;width:55px") +
+          th("Gen. Sup","text-align:center;width:65px")
+        : "";
+      return `<tr>${th("Item")}${th("In Stock")}${th("Qty Req")}${th("Comments")}${farmTh}
+              <th style="width:36px;border-bottom:2px solid #C8A96E"></th></tr>`;
+    }
+    function renderTracker() {
+      const phase = loaded.Phase || "";
+      const phases = getPhases(loaded.Category, loaded.Maintenance_Unit == 1);
+      const idx = phases.indexOf(phase);
+      let html = '<div class="tracker">';
+      phases.forEach((p, i) => {
+        const state = i < idx ? "step-done" : i === idx ? "step-current" : "step-todo";
+        const symbol = i < idx ? "✓" : (i + 1);
+        html += `<div class="tracker-step ${state}">
+                   <div class="tracker-circle">${symbol}</div>
+                   <div class="tracker-label">${esc(p)}</div>
+                 </div>`;
+        if (i < phases.length - 1) {
+          const lineState = i < idx ? "line-done" : "line-todo";
+          html += `<div class="tracker-line ${lineState}"></div>`;
+        }
+      });
+      html += '</div>';
+      return html;
+    }
+    function updateItemBool(index, field, checked) {
+      loadedItems[index][field] = checked ? 1 : 0;
+    }
+    function updateItem(index, field, value) {
+      loadedItems[index][field] = value;
+    }
+
+    function addItem() {
+      loadedItems.push({
+        Item_Name: "", Amt_In_Stock: "", Quantity_Requested: "", Comments: "",
+        Broiler: 0, Layer: 0, Pigs: 0, Gen_Supply: 0
+      });
+      refreshItems();
+    }
+
+    function removeItem(index) {
+      loadedItems.splice(index, 1);
+      refreshItems();
+    }
+
+    function refreshItems() {
+      document.getElementById("itemsBody").innerHTML = renderItemRows();
+    }
+
+    async function save() {
+      const msg = document.getElementById("msg");
+      const saveDoc = loaded.Document_Number || doc;
+      if (!saveDoc) {
+        msg.className = "msg error";
+        msg.textContent = "Pick a Category first (to assign a document number).";
+        return;
+      }
+      msg.className = "msg"; msg.textContent = "Saving...";
+      const fields = gatherFields();
+      try {
+        await api(`/requisitions/${encodeURIComponent(saveDoc)}`, {
+          method: "PUT", body: JSON.stringify({ fields, items: loadedItems })
+        });
+        loaded = fields;
+        msg.className = "msg ok"; msg.textContent = "Saved.";
+      } catch (err) {
+        msg.className = "msg error"; msg.textContent = "Save failed: " + err.message;
+      }
+    }
+    const INT_FIELDS = ["Maintenance_Unit","Accounts_Acknowledged",
+                        "Send_Kitchen","Send_Household","Send_IT","Send_Maintenance"];
+    function gatherFields() {
+      const fields = {};
+      for (const [k, v] of Object.entries(loaded)) {
+        if (INT_FIELDS.includes(k)) {
+          fields[k] = (v === null || v === undefined || v === "") ? 0 : Number(v);
+        } else {
+          fields[k] = (v === null || v === undefined) ? "" : v;
+        }
+      }
+      for (const name of EDITABLE) {
+        const el = document.getElementById(name);
+        if (el && !el.disabled) {
+          fields[name] = (el.type === "checkbox") ? (el.checked ? 1 : 0) : el.value;
+        }
+      }
+      return fields;
+    }          
+    
+    let userNames = [];
+
+    async function openSubmit() {
+      const phase = loaded.Phase || "";
+      const phases = getPhases(loaded.Category, loaded.Maintenance_Unit == 1);
+      const idx = phases.indexOf(phase);
+      if (idx < 0 || idx + 1 >= phases.length) {
+        alert("This requisition is already at the final phase.");
+        return;
+      }
+      const naturalNext = phases[idx + 1];
+      const vpChoice = (phase === "VP Review");
+      // Load users for the assignee dropdown (once)      
+      if (!userNames.length) {
+        userNames = await api("/user-names") || [];
+      }
+
+      // Build the next-phase control
+      let nextPhaseControl;
+      if (vpChoice) {
+        nextPhaseControl = `<select id="nextPhase" onchange="onNextPhaseChange()">
+            <option value="${esc(naturalNext)}">${esc(naturalNext)}</option>
+            <option value="Completed">Completed</option>
+          </select>`;
+      } else {
+        nextPhaseControl = `<input id="nextPhase" value="${esc(naturalNext)}" readonly
+                             style="background:#F0F0F0">`;
+      }
+
+      const userOpts = ['<option value=""></option>']
+        .concat(userNames.map(u => `<option value="${esc(u)}">${esc(u)}</option>`)).join("");
+
+      // Overlay panel
+      const overlay = document.createElement("div");
+      overlay.id = "submitOverlay";
+      overlay.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,0.4);
+        display:flex;align-items:center;justify-content:center;z-index:100`;
+      overlay.innerHTML = `
+        <div style="background:#fff;border-radius:8px;width:420px;overflow:hidden">
+          <div style="background:#1A2B4A;color:#fff;padding:14px 20px;font-weight:bold">
+            Submit Requisition</div>
+          <div style="padding:20px">
+            <label style="font-size:12px;font-weight:bold;color:#78716C">Next Phase</label>
+            <div style="margin:4px 0 14px">${nextPhaseControl}</div>
+            <div id="assigneeWrap">
+              <label style="font-size:12px;font-weight:bold;color:#78716C">Assigned To</label>
+              <div style="margin:4px 0 14px">
+                <select id="assignee">${userOpts}</select></div>
+            </div>
+            <label style="font-size:12px;font-weight:bold;color:#78716C">Comments</label>
+            <div style="margin:4px 0 14px">
+              <textarea id="submitComments" style="width:100%;min-height:50px"></textarea></div>
+            <div id="submitMsg" style="font-size:13px;min-height:18px"></div>
+          </div>
+          <div style="padding:12px 20px;border-top:1px solid #D8D0C8;display:flex;
+                      gap:10px;justify-content:flex-end">
+            <button class="btn-back" onclick="closeSubmit()">Cancel</button>
+            <button class="btn-submit" onclick="doSubmit()">Submit</button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      onNextPhaseChange();   // set initial assignee visibility
+    }
+
+    function onNextPhaseChange() {
+      const np = document.getElementById("nextPhase").value;
+      const wrap = document.getElementById("assigneeWrap");
+      // Completed is terminal — no assignee needed
+      wrap.style.display = (np === "Completed") ? "none" : "block";
+    }
+
+    function closeSubmit() {
+      const o = document.getElementById("submitOverlay");
+      if (o) o.remove();
+    }
+
+    async function doSubmit() {
+      const msg = document.getElementById("submitMsg");
+      const nextPhase = document.getElementById("nextPhase").value;
+      const completing = (nextPhase === "Completed");
+      const assignee = completing ? "" : document.getElementById("assignee").value;
+      const comments = document.getElementById("submitComments").value;
+
+      if (!completing && !assignee) {
+        msg.style.color = "#DC2626"; msg.textContent = "Please select an assignee.";
+        return;
+      }
+      msg.style.color = "#78716C"; msg.textContent = "Submitting...";
+
+      // Round-trip fields (same as save) so nothing is lost
+      const INT_FIELDS = ["Maintenance_Unit","Accounts_Acknowledged",
+                          "Send_Kitchen","Send_Household","Send_IT","Send_Maintenance"];
+      const fields = {};
+      for (const [k, v] of Object.entries(loaded)) {
+        if (INT_FIELDS.includes(k)) {
+          fields[k] = (v === null || v === undefined || v === "") ? 0 : Number(v);
+        } else {
+          fields[k] = (v === null || v === undefined) ? "" : v;
+        }
+      }
+      for (const name of EDITABLE) {
+        const el = document.getElementById(name);
+        if (el && !el.disabled) {
+          fields[name] = (el.type === "checkbox") ? (el.checked ? 1 : 0) : el.value;
+        }
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/requisitions/${encodeURIComponent(doc)}/submit`, {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fields, items: loadedItems,
+            assignee,
+            completed_phase: loaded.Phase || "",
+            comments,
+            next_phase: nextPhase
+          })
+        });
+        if (res.status === 401) { window.location.href = "login.html"; return; }
+        if (!res.ok) {
+          let detail = `Submit failed (${res.status}).`;
+          try { const j = await res.json(); if (j.detail) detail = j.detail; } catch {}
+          msg.style.color = "#DC2626"; msg.textContent = detail;
+          return;
+        }
+        // Success — back to the list
+        window.location.href = "requisitions.html";
+      } catch (err) {
+        msg.style.color = "#DC2626"; msg.textContent = "Error: " + err.message;
+      }
+    }
+    load();
+  </script>
+</body>
+</html>

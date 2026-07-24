@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Church Teachers College — Sign in</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', Verdana, sans-serif; margin: 0;
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      background:
+        radial-gradient(1200px 600px at 50% -10%, #24406b 0%, transparent 60%),
+        linear-gradient(160deg, #1A2B4A 0%, #142338 100%);
+      padding: 20px;
+    }
+    .card {
+      background: #fff; width: 100%; max-width: 380px; border-radius: 10px;
+      box-shadow: 0 20px 50px rgba(10,20,40,0.35);
+      overflow: hidden;
+    }
+    .card-top {
+      background: #fff; padding: 32px 40px 20px; text-align: center;
+      border-bottom: 3px solid #C8A96E;
+    }
+    .card-top img { height: 64px; margin-bottom: 14px; }
+    .card-top h1 { color: #1A2B4A; font-size: 19px; margin: 0 0 4px; letter-spacing: 0.2px; }
+    .card-top .sub {
+      color: #8A8178; font-size: 11px; margin: 0; text-transform: uppercase;
+      letter-spacing: 1.5px; font-weight: bold;
+    }
+    .card-body { padding: 28px 40px 36px; }
+    label {
+      display: block; font-size: 12px; font-weight: bold; color: #44403C;
+      margin: 0 0 6px; letter-spacing: 0.3px;
+    }
+    .field { margin-bottom: 18px; }
+    input {
+      width: 100%; padding: 12px 13px; border: 1px solid #D8D0C8;
+      border-radius: 6px; font-size: 15px; transition: border-color .15s, box-shadow .15s;
+    }
+    input:focus {
+      outline: none; border-color: #1A2B4A;
+      box-shadow: 0 0 0 3px rgba(26,43,74,0.12);
+    }
+    button {
+      width: 100%; margin-top: 6px; padding: 13px;
+      background: #1A2B4A; color: #fff; border: none; border-radius: 6px;
+      font-size: 15px; font-weight: bold; letter-spacing: 0.3px; cursor: pointer;
+      transition: background .15s;
+    }
+    button:hover { background: #24406b; }
+    button:active { background: #142338; }
+    .msg { margin-top: 16px; font-size: 13px; min-height: 18px; text-align: center; }
+    .error { color: #DC2626; }
+    .ok { color: #16A34A; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="card-top">
+      <img src="assets/image.png" alt="Church Teachers College">
+      <h1>Church Teachers College</h1>
+      <p class="sub">Requisition Management</p>
+    </div>
+    <div class="card-body">
+      <div class="field">
+        <label for="username">Username</label>
+        <input type="text" id="username" autocomplete="username">
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input type="password" id="password" autocomplete="current-password">
+      </div>
+      <button onclick="doLogin()">Sign in</button>
+      <div class="msg" id="msg"></div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = "http://localhost:8000";
+
+    async function doLogin() {
+      const username = document.getElementById("username").value.trim();
+      const password = document.getElementById("password").value;
+      const msg = document.getElementById("msg");
+      msg.className = "msg";
+      msg.textContent = "Signing in...";
+
+      try {
+        const res = await fetch(`${API_BASE}/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username, password, os_user: "web" })
+        });
+
+        if (!res.ok) {
+          msg.className = "msg error";
+          msg.textContent = res.status === 401
+            ? "Invalid username or password."
+            : `Login failed (${res.status}).`;
+          return;
+        }
+
+        const data = await res.json();
+        localStorage.setItem("ctc_token", data.token);
+        localStorage.setItem("ctc_user", data.full_name || "");
+        localStorage.setItem("ctc_admin", data.is_admin ? "1" : "");
+        window.location.href = "requisitions.html";
+      } catch (err) {
+        msg.className = "msg error";
+        msg.textContent = "Could not reach the server. Is the API running?";
+        console.error(err);
+      }
+    }
+
+    document.addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });
+  </script>   
+</body>
+</html>
