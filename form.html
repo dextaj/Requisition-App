@@ -16,9 +16,9 @@
     .card { background: #fff; border: 1px solid #D8D0C8; border-radius: 6px;
             margin-bottom: 20px; overflow: hidden; }
     .card h2 { font-size: 14px; color: #1A2B4A; margin: 0;
-               padding: 12px 16px; border-bottom: 2px solid #C8A96E;
+               padding: 10px 16px; border-bottom: 2px solid #C8A96E;
                display: flex; justify-content: space-between; align-items: center; }
-    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 24px; padding: 16px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; padding: 16px; }
     .field { display: flex; flex-direction: column; }
     .field.full { grid-column: 1 / -1; }
     label { font-size: 12px; font-weight: bold; color: #78716C; margin-bottom: 4px; }
@@ -38,11 +38,37 @@
     .btn-submit { background: #16A34A; color: #fff; }
     .msg { padding: 12px 24px; font-size: 13px; min-height: 18px; }
     .ok { color: #16A34A; } .error { color: #DC2626; }
+    
+    .tracker { display: flex; align-items: flex-start; justify-content: center;
+               padding: 18px 16px 14px; border-bottom: 1px solid #eee;
+               overflow-x: auto; }
+    .tracker-step { display: flex; flex-direction: column; align-items: center;
+                    flex: 0 0 auto; position: relative; }
+    .tracker-circle { width: 38px; height: 38px; border-radius: 50%;
+                      display: flex; align-items: center; justify-content: center;
+                      font-weight: bold; font-size: 14px; border: 2px solid;
+                      z-index: 1; background: #fff; }
+    .tracker-label { font-size: 11px; text-align: center; margin-top: 6px;
+                     width: 78px; line-height: 1.2; }
+    .tracker-line { flex: 0 0 40px; height: 2px; margin-top: 19px; }
+    /* States */
+    .step-done .tracker-circle { background: #16A34A; border-color: #16A34A; color: #fff; }
+    .step-done .tracker-label { color: #16A34A; }
+    .step-current .tracker-circle { background: #1A2B4A; border-color: #C8A96E; color: #fff;
+                                    box-shadow: 0 0 0 4px rgba(200,169,110,0.3); }
+    .step-current .tracker-label { color: #1A2B4A; font-weight: bold; }
+    .step-todo .tracker-circle { background: #F0F0F0; border-color: #D8D0C8; color: #A8A29E; }
+    .step-todo .tracker-label { color: #A8A29E; }
+    .line-done { background: #16A34A; }
+    .line-todo { background: #D8D0C8; }
   </style>
 </head>
 <body>
   <header>
-    <h1>Requisition</h1>
+    <div style="display:flex;align-items:center;gap:12px">
+      <img src="assets/image.png" alt="Church Teachers College" style="height:40px">
+      <h1>Requisition</h1>
+    </div>
     <a href="requisitions.html">&larr; Back to list</a>
   </header>
   <div class="wrap" id="content"><div class="msg">Loading...</div></div>
@@ -260,10 +286,11 @@
       
       document.getElementById("content").innerHTML = `
         <div class="card">
+          ${renderTracker()}
           <h2>${esc(r.Document_Number || doc)}
             <span class="phase" style="${phaseColor(phase)}">${esc(phase)}</span>
           </h2>
-          <div class="grid">
+          <div class="grid">            
             ${fld("Created_By", "Created By", "input")}
             ${fld("Site", "Site", "select", lists.site)}
             ${fld("Category", "Category", "select", lists.category)}
@@ -429,6 +456,26 @@
         : "";
       return `<tr>${th("Item")}${th("In Stock")}${th("Qty Req")}${th("Comments")}${farmTh}
               <th style="width:36px;border-bottom:2px solid #C8A96E"></th></tr>`;
+    }
+    function renderTracker() {
+      const phase = loaded.Phase || "";
+      const phases = getPhases(loaded.Category, loaded.Maintenance_Unit == 1);
+      const idx = phases.indexOf(phase);
+      let html = '<div class="tracker">';
+      phases.forEach((p, i) => {
+        const state = i < idx ? "step-done" : i === idx ? "step-current" : "step-todo";
+        const symbol = i < idx ? "✓" : (i + 1);
+        html += `<div class="tracker-step ${state}">
+                   <div class="tracker-circle">${symbol}</div>
+                   <div class="tracker-label">${esc(p)}</div>
+                 </div>`;
+        if (i < phases.length - 1) {
+          const lineState = i < idx ? "line-done" : "line-todo";
+          html += `<div class="tracker-line ${lineState}"></div>`;
+        }
+      });
+      html += '</div>';
+      return html;
     }
     function updateItemBool(index, field, checked) {
       loadedItems[index][field] = checked ? 1 : 0;
