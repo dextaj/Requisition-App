@@ -313,6 +313,7 @@
             ${fld("Principal_Comment", "Principal Comments", "textarea")}
             ${fld("VP_Signature", "VP Signature", "input")}
             ${fld("Principal_Signature", "Principal Signature", "input")}
+            ${["Send_Kitchen","Send_Household","Send_IT","Send_Maintenance"].some(n => fieldRule(n, phase).show) ? `
             <div class="field full" id="deptSendWrap">
               <label>Send to Department(s)</label>
               <div style="display:flex;gap:18px;flex-wrap:wrap;padding:6px 0">
@@ -321,7 +322,7 @@
                 ${chk("Send_IT","IT")}
                 ${chk("Send_Maintenance","Maintenance")}
               </div>
-            </div>
+            </div>` : ""}
             <div class="field full">
               ${chk("Maintenance_Unit", "Route through Maintenance Unit")}
             </div>
