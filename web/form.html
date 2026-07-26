@@ -370,8 +370,7 @@
       if (siteEl) {
         siteEl.addEventListener("change", () => {
           loaded.Site = siteEl.value;
-          refreshItems();
-          document.getElementById("itemsHead").innerHTML = renderItemHead();
+          render();
         });
       }
       // Maintenance routing checkbox: show/hide the maintenance card live
