@@ -590,6 +590,11 @@
           <div style="padding:20px">
             <label style="font-size:12px;font-weight:bold;color:#78716C">Next Phase</label>
             <div style="margin:4px 0 14px">${nextPhaseControl}</div>
+            <label style="font-size:12px;font-weight:bold;color:#78716C">Date Assigned</label>
+            <div style="margin:4px 0 14px">
+              <input value="${new Date().toISOString().slice(0,10)}" readonly
+                     style="width:100%;background:#F0F0F0">
+            </div>
             <div id="assigneeWrap">
               <label style="font-size:12px;font-weight:bold;color:#78716C">Assigned To</label>
               <div style="margin:4px 0 14px">
@@ -602,8 +607,8 @@
           </div>
           <div style="padding:12px 20px;border-top:1px solid #D8D0C8;display:flex;
                       gap:10px;justify-content:flex-end">
-            <button class="btn-back" onclick="closeSubmit()">Cancel</button>
-            <button class="btn-submit" onclick="doSubmit()">Submit</button>
+            <button class="btn-back" onclick="closeSubmit()" style="padding:12px 24px;font-size:15px">Cancel</button>
+            <button class="btn-submit" onclick="doSubmit()" style="padding:12px 24px;font-size:15px">Submit</button>
           </div>
         </div>`;
       document.body.appendChild(overlay);
@@ -654,7 +659,8 @@
       }
 
       try {
-        const res = await fetch(`${API_BASE}/requisitions/${encodeURIComponent(doc)}/submit`, {
+        const submitDoc = loaded.Document_Number || doc;
+        const res = await fetch(`${API_BASE}/requisitions/${encodeURIComponent(submitDoc)}/submit`, {
           method: "POST",
           headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
           body: JSON.stringify({
