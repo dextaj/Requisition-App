@@ -190,8 +190,11 @@
         case "Site": case "Category": case "Department":
           return E(isDraft);
 
-        case "Requesting":              // Items Requested — editable at Draft
-          return E(isDraft);
+        case "Requesting": {            // Items Requested — only when no items table
+          const usesItemsTable = (loaded.Site === "Farm" ||
+                                  ITEMS_CATEGORIES.includes(loaded.Category));
+          return E(isDraft, !usesItemsTable);
+        }
 
         case "HOD_Comment":             // hidden at Draft; editable only at HOD Review
           return E(phase === "HOD Review", !isDraft);
@@ -213,9 +216,9 @@
 
         case "Send_Kitchen": case "Send_Household":
         case "Send_IT": case "Send_Maintenance": {
-          const anySet = loaded.Send_Kitchen == 1 || loaded.Send_Household == 1 ||
-                         loaded.Send_IT == 1 || loaded.Send_Maintenance == 1;
-          return E(phase === "VP Review", phase === "VP Review" || anySet);
+          // Show at VP Review and all later phases; editable only at VP Review
+          const beforeVP = ["", "Draft", "HOD Review"].includes(phase);
+          return E(phase === "VP Review", !beforeVP);
         }
 
         case "VP_Signature":
