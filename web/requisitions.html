@@ -44,6 +44,8 @@
             style="background:#16A34A;color:#fff">+ New Requisition</button>
     <button id="btnMine" class="active" onclick="setScope('mine')">Mine</button>
     <button id="btnAll" onclick="setScope('all')" style="display:none">All</button>
+    <button id="btnUsers" onclick="location.href='users.html'"
+            style="display:none;background:#1A2B4A;color:#fff">Manage Users</button>
     <div class="spacer"></div>
     <input type="text" id="search" placeholder="Search..." oninput="render()">
     <button onclick="logout()" style="background:#DC2626;color:#fff">Sign Out</button>
@@ -92,6 +94,10 @@
         // Who am I? (shows name; reveals All button for VP/Principal later)
         const me = await apiGet("/auth/me");
         if (me) document.getElementById("userLabel").textContent = me.full_name || "";
+        if (localStorage.getItem("ctc_admin") === "1") {
+          document.getElementById("btnAll").style.display = "";
+          document.getElementById("btnUsers").style.display = "";
+        }
 
         allRows = await apiGet(`/requisitions?scope=${scope}`) || [];
         msg.textContent = allRows.length ? "" : "No requisitions found.";
