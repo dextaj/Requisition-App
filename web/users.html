@@ -77,8 +77,13 @@
           <input id="last">
         </div>
         <div class="field">
-          <label for="username">Username</label>
-          <input id="username" autocomplete="off">
+          <label for="password">Password</label>
+          <input id="password" type="password" autocomplete="new-password">
+          <div class="hint" id="pwHint">Required for a new user.</div>
+        </div>
+        <div class="field">
+          <label for="password2">Confirm password</label>
+          <input id="password2" type="password" autocomplete="new-password">
         </div>
         <div class="field">
           <label for="email">Email</label>
@@ -179,6 +184,7 @@
         document.getElementById("email").value    = u[4] || "";
         document.getElementById("osuser").value   = u[5] || "";
         document.getElementById("password").value = "";
+        document.getElementById("password2").value = "";
         document.getElementById("pwHint").textContent =
           "Leave blank to keep the current password.";
         setMsg("", "");
@@ -191,7 +197,7 @@
     function clearForm() {
       editingId = null;
       document.getElementById("formTitle").textContent = "New User";
-      ["first","last","username","email","osuser","password"].forEach(
+      ["first","last","username","email","osuser","password","password2"].forEach(
         id => document.getElementById(id).value = "");
       document.getElementById("pwHint").textContent = "Required for a new user.";
       setMsg("", "");
@@ -220,6 +226,11 @@
       }
       if (editingId === null && !body.password) {
         setMsg("A password is required for a new user.", "error");
+        return;
+      }
+      const pw2 = document.getElementById("password2").value;
+      if (body.password && body.password !== pw2) {
+        setMsg("The two passwords don't match.", "error");
         return;
       }
 
