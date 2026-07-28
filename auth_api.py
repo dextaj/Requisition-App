@@ -149,12 +149,14 @@ def login(req: LoginRequest):
     try:
         with get_connection() as conn:
             cur = conn.cursor()
-            cur.execute("SELECT UserID, FirstName, LastName, Password_hash "
+            cur.execute("SELECT UserID, FirstName, LastName, Password_hash, Enabled "
                         "FROM Administration.Users WHERE UserName = ?", (req.username,))
             row = cur.fetchone()
             if row is None or not verify_password(req.password, row.Password_hash):
                 raise HTTPException(status_code=401, detail="Incorrect username or password.")
-            user_id, first, last, _ = row
+            if not row.Enabled:
+                raise HTTPException(status_code=403, detail="This account has been disabled. Contact an administrator.")
+            user_id, first, last, _, _ = row
             full_name = f"{first} {last}"
             cur.execute("SELECT 1 FROM Administration.UserGroups ug "
                         "JOIN Administration.Groups g ON g.GroupID = ug.GroupID "
@@ -280,7 +282,7 @@ class UserIn(BaseModel):
 def list_users(_: int = Depends(require_admin)):
     with get_connection() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT UserID, FirstName, LastName, UserName, Email, OSuser "
+        cur.execute("SELECT UserID, FirstName, LastName, UserName, Email, OSuser, Enabled "
                     "FROM Administration.Users ORDER BY LastName, FirstName")
         return [list(r) for r in cur.fetchall()]
 
@@ -289,7 +291,7 @@ def list_users(_: int = Depends(require_admin)):
 def get_user(user_id: int, _: int = Depends(require_admin)):
     with get_connection() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT UserID, FirstName, LastName, UserName, Email, OSuser "
+        cur.execute("SELECT UserID, FirstName, LastName, UserName, Email, OSuser, Enabled "
                     "FROM Administration.Users WHERE UserID = ?", (user_id,))
         row = cur.fetchone()
     if row is None:
@@ -332,10 +334,22 @@ def update_user(user_id: int, body: UserIn, _: int = Depends(require_admin)):
                          body.osuser or None, user_id))
         conn.commit()
     return {"ok": True}
-    
+
+class EnabledIn(BaseModel):
+    enabled: bool
+@app.put("/users/{user_id}/enabled")
+def set_user_enabled(user_id: int, body: EnabledIn, _: int = Depends(require_admin)):
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("UPDATE Administration.Users SET Enabled=? WHERE UserID=?",
+                    (1 if body.enabled else 0, user_id))
+        if cur.rowcount == 0:
+            raise HTTPException(404, "User not found")
+        conn.commit()
+    return {"ok": True, "enabled": body.enabled}
+
 import base64
 CORE_GROUPS = ("Administration", "HOD", "VP", "Principal")
-
 
 # ── Admin: keyword tables ──────────────────────────────────────────────────
 def _require_keyword_table(cur, table):
