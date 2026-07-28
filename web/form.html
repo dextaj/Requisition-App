@@ -165,6 +165,7 @@
             '<div class="msg error">No document specified.</div>';
           return;
         }
+        loaded = await api(`/requisitions/${encodeURIComponent(doc)}`) || {};
         loadedItems = await api(`/requisitions/${encodeURIComponent(doc)}/items`) || [];
         loadedItems.forEach(it => {
           it.Broiler = it.Broiler ? 1 : 0; it.Layer = it.Layer ? 1 : 0;
