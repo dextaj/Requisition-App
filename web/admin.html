@@ -130,11 +130,39 @@
 
       <div class="card">
         <h2>Keywords</h2>
-        <div class="body">
-          <div class="muted">Manage dropdown-list values. (Coming soon.)</div>
+        <div class="body" style="padding-top:8px;">
+          <div class="muted" style="margin-bottom:8px;">Select a list to manage its values.</div>
         </div>
+        <div id="keywordList"><div class="empty">Loading…</div></div>
       </div>
 
+    </div>
+  </div>
+
+  <!-- Keywords editor modal -->
+  <div class="overlay" id="kwOverlay">
+    <div class="modal">
+      <h3 id="kwTitle">Keywords</h3>
+      <div style="padding:16px 20px;overflow-y:auto;max-height:60vh;">
+        <table style="width:100%;">
+          <thead>
+            <tr>
+              <th style="width:auto;">Value</th>
+              <th style="width:80px;text-align:center;">Active</th>
+              <th style="width:70px;"></th>
+            </tr>
+          </thead>
+          <tbody id="kwRows"></tbody>
+        </table>
+        <button class="btn btn-gold" style="margin-top:12px;" onclick="kwAddRow()">+ Add Row</button>
+      </div>
+      <div class="modal-foot">
+        <span class="status" id="kwStatus"></span>
+        <div class="btns">
+          <button class="cancel" onclick="closeKw()">Cancel</button>
+          <button class="save" onclick="saveKw()">Save</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -342,8 +370,134 @@
       if (e.target.id === "grpOverlay") closeGroup();
     });
 
+    // ── Keywords ────────────────────────────────────────────────
+    // Tables list
+    async function loadKeywords() {
+      const el = document.getElementById("keywordList");
+      try {
+        const tables = await api("/keywords/tables") || [];
+        if (!tables.length) { el.innerHTML = '<div class="empty">No keyword lists found.</div>'; return; }
+        el.innerHTML = tables.map(t => `
+          <div class="group-row" onclick="openKw(${JSON.stringify(t).replace(/"/g,'&quot;')})">
+            <span>${esc(t)}</span>
+            <span class="count">edit &rarr;</span>
+          </div>`).join("");
+      } catch (err) {
+        el.innerHTML = `<div class="empty" style="color:#DC2626">Could not load lists: ${esc(err.message)}</div>`;
+      }
+    }
+
+    // Editor state
+    let kwTable = null;
+    let kwOriginal = [];   // [[Id, name, active], ...] as loaded
+    let kwNextTemp = -1;   // temp negative ids for new rows
+
+    async function openKw(table) {
+      kwTable = table;
+      document.getElementById("kwTitle").textContent = "Keywords — " + table;
+      document.getElementById("kwStatus").textContent = "";
+      const tbody = document.getElementById("kwRows");
+      tbody.innerHTML = '<tr><td colspan="3" class="muted">Loading…</td></tr>';
+      document.getElementById("kwOverlay").classList.add("open");
+      try {
+        const rows = await api(`/keywords/${encodeURIComponent(table)}`) || [];
+        kwOriginal = rows.map(r => [r[0], r[1], !!r[2]]);
+        kwNextTemp = -1;
+        renderKwRows(kwOriginal.map(r => ({ id: r[0], name: r[1], active: r[2], deleted: false })));
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="3" style="color:#DC2626">Could not load: ${esc(err.message)}</td></tr>`;
+      }
+    }
+
+    // We keep the working set in the DOM; each row carries data-id.
+    function renderKwRows(items) {
+      const tbody = document.getElementById("kwRows");
+      tbody.innerHTML = items.map(it => kwRowHtml(it.id, it.name, it.active)).join("");
+    }
+
+    function kwRowHtml(id, name, active) {
+      return `
+        <tr data-id="${id}">
+          <td><input class="txt kw-name" value="${esc(name)}"
+                     style="width:100%;padding:8px;border:1px solid #D8D0C8;border-radius:5px;"></td>
+          <td style="text-align:center;">
+            <input type="checkbox" class="kw-active" ${active ? "checked" : ""}
+                   style="width:20px;height:20px;">
+          </td>
+          <td style="text-align:center;">
+            <button onclick="kwDeleteRow(this)"
+                    style="background:#FBE9E9;color:#B4232A;border:none;border-radius:5px;
+                           padding:6px 10px;font-weight:bold;cursor:pointer;">Delete</button>
+          </td>
+        </tr>`;
+    }
+
+    function kwAddRow() {
+      const tbody = document.getElementById("kwRows");
+      tbody.insertAdjacentHTML("beforeend", kwRowHtml(kwNextTemp, "", true));
+      kwNextTemp -= 1;
+      const rows = tbody.querySelectorAll("tr");
+      const last = rows[rows.length - 1];
+      const inp = last.querySelector(".kw-name");
+      if (inp) inp.focus();
+    }
+
+    function kwDeleteRow(btn) {
+      btn.closest("tr").remove();
+    }
+
+    function closeKw() {
+      document.getElementById("kwOverlay").classList.remove("open");
+      kwTable = null;
+    }
+
+    async function saveKw() {
+      if (!kwTable) return;
+      const tbody = document.getElementById("kwRows");
+      const rows = [...tbody.querySelectorAll("tr")];
+
+      const present = rows.map(tr => ({
+        id: Number(tr.dataset.id),
+        name: tr.querySelector(".kw-name").value.trim(),
+        active: tr.querySelector(".kw-active").checked
+      }));
+
+      // validate: no blank names
+      if (present.some(r => !r.name)) {
+        document.getElementById("kwStatus").textContent = "Values can't be blank.";
+        return;
+      }
+
+      const origById = new Map(kwOriginal.map(r => [r[0], { name: r[1], active: r[2] }]));
+      const presentIds = new Set(present.filter(r => r.id > 0).map(r => r.id));
+
+      const inserted = present.filter(r => r.id < 0).map(r => [r.name, r.active]);
+      const deleted = kwOriginal.filter(r => !presentIds.has(r[0])).map(r => r[0]);
+      const updated = present.filter(r => {
+        if (r.id < 0) return false;
+        const o = origById.get(r.id);
+        return o && (o.name !== r.name || o.active !== r.active);
+      }).map(r => [r.id, r.name, r.active]);
+
+      document.getElementById("kwStatus").textContent = "Saving…";
+      try {
+        await api(`/keywords/${encodeURIComponent(kwTable)}`, {
+          method: "PUT",
+          body: JSON.stringify({ updated, deleted, inserted })
+        });
+        closeKw();
+      } catch (err) {
+        document.getElementById("kwStatus").textContent = "Save failed: " + err.message;
+      }
+    }
+
+    document.getElementById("kwOverlay").addEventListener("click", (e) => {
+      if (e.target.id === "kwOverlay") closeKw();
+    });
+
     loadUsers();
     loadGroups();
+    loadKeywords();
   </script>
 </body>
 </html>
