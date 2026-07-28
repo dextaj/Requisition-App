@@ -872,7 +872,296 @@ def req_delete_attachment(att_id: int, _: int = Depends(current_user_id)):
     
 import jwt
 from datetime import datetime, timezone, timedelta
+# ============================================================================
+#  PDF EXPORT  — paste this whole block into auth_api.py
+#  Suggested location: near the end, just before the token-helper section
+#  (before the "if not ... CTC_JWT_SECRET" area, ~line 883).
+#  Requires 'reportlab' in requirements.txt.
+# ============================================================================
+import io as _io
 
+
+def build_requisition_pdf(data: dict) -> bytes:
+    """Render a requisition to PDF bytes. Mirrors the desktop build_requisition_pdf."""
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib import colors
+    from reportlab.lib.units import inch
+    from reportlab.lib.utils import ImageReader
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer,
+                                     Table, TableStyle, Image as RLImage)
+
+    NAVY = colors.HexColor("#1A2B4A")
+    styles = getSampleStyleSheet()
+    title = ParagraphStyle("t", parent=styles["Title"], fontSize=16, spaceAfter=2)
+    sub = ParagraphStyle("s", parent=styles["Heading2"], fontSize=12,
+                         textColor=NAVY, spaceAfter=8)
+    head = ParagraphStyle("h", parent=styles["Heading4"], textColor=NAVY,
+                          spaceBefore=10, spaceAfter=3)
+    body = styles["BodyText"]
+
+    def para(text):
+        return Paragraph(str(text or "").replace("\n", "<br/>"), body)
+
+    buf = _io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=letter, title=f"Requisition {data.get('document_number','')}",
+        leftMargin=0.7 * inch, rightMargin=0.7 * inch,
+        topMargin=0.7 * inch, bottomMargin=0.7 * inch)
+    elems = [Paragraph("Church Teachers College", title),
+             Paragraph("Requisition", sub)]
+
+    def info_block(pairs):
+        rows = [[Paragraph(f"<b>{k}</b>", body), para(v)]
+                for k, v in pairs if v not in (None, "")]
+        if not rows:
+            return
+        t = Table(rows, colWidths=[1.7 * inch, 5.0 * inch])
+        t.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("TOPPADDING", (0, 0), (-1, -1), 2),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ]))
+        elems.append(t)
+
+    summary = [
+        ("Document #", data.get("document_number")),
+        ("Created By", data.get("created_by")),
+        ("Site", data.get("site")),
+        ("Category", data.get("category")),
+        ("Dept & Units", data.get("department")),
+        ("Maintenance Area", data.get("maintenance")),
+        ("Academic Dept", data.get("academic")),
+        ("Purchased At", data.get("supplier")),
+        ("Purpose", data.get("purpose")),
+        ("Cost", data.get("cost")),
+        ("Current Phase", data.get("phase")),
+    ]
+    if data.get("category") == "Transport":
+        summary += [("Date of Trip", data.get("trip_date")),
+                    ("Destination", data.get("destination")),
+                    ("Time of Departure", data.get("departure_time"))]
+    info_block(summary)
+
+    def items_table(header, rows, weights):
+        avail = 7.0 * inch
+        widths = [avail * w / sum(weights) for w in weights]
+        tdata = [[Paragraph(f"<b>{h}</b>", body) for h in header]]
+        tdata += rows
+        t = Table(tdata, colWidths=widths, repeatRows=1)
+        t.setStyle(TableStyle([
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#D8D0C8")),
+            ("BACKGROUND", (0, 0), (-1, 0), NAVY),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("ALIGN", (1, 1), (-1, -1), "CENTER"),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ]))
+        elems.append(t)
+
+    mode = data.get("items_mode")
+    items = data.get("items") or []
+    if mode == "farm":
+        elems.append(Paragraph("Items", head))
+        rows = [[para(it.get("Item_Name")), it.get("Amt_In_Stock", ""),
+                 it.get("Quantity_Requested", ""),
+                 "X" if it.get("Broiler") else "", "X" if it.get("Layer") else "",
+                 "X" if it.get("Pigs") else "", "X" if it.get("Gen_Supply") else ""]
+                for it in items]
+        items_table(["Items to be purchased", "Amt. In Stock", "Quantity Requested",
+                     "Broiler", "Layer", "Pigs", "Gen. Sup/main"],
+                    rows, [6, 2, 2, 1, 1, 1, 1.5])
+    elif mode == "comments":
+        elems.append(Paragraph("Items", head))
+        rows = [[para(it.get("Item_Name")), it.get("Amt_In_Stock", ""),
+                 it.get("Quantity_Requested", ""), para(it.get("Comments"))]
+                for it in items]
+        items_table(["Items to be purchased", "Amt. In Stock",
+                     "Quantity Requested", "Comments"], rows, [5, 2, 2, 5])
+    elif data.get("requesting"):
+        elems.append(Paragraph("Items Requested", head))
+        elems.append(para(data.get("requesting")))
+
+    for label, key in [("Scope of Work", "scope"), ("Contractor(s)", "contractor"),
+                       ("List of Materials", "material"),
+                       ("HOD Comment", "hod_comment"),
+                       ("VP Reviewer Notes", "vp_comment"),
+                       ("VP Approver Comments", "vp_approval"),
+                       ("Principal Comments", "principal_comment")]:
+        if data.get(key):
+            elems.append(Paragraph(label, head))
+            elems.append(para(data.get(key)))
+
+    elems.append(Spacer(1, 16))
+    elems.append(Paragraph("Approvals & Accounts", head))
+
+    approvers = data.get("approvers") or {}
+
+    def sig_flowable(info):
+        if info and info.get("image"):
+            try:
+                bio = _io.BytesIO(info["image"])
+                iw, ih = ImageReader(bio).getSize()
+                h = 0.5 * inch
+                w = min(2.0 * inch, h * iw / ih) if ih else 1.5 * inch
+                bio.seek(0)
+                return RLImage(bio, width=w, height=h)
+            except Exception:
+                pass
+        return Spacer(1, 0.5 * inch)
+
+    sig_imgs, sig_caps = [], []
+    for key, label in (("hod", "HOD"), ("vp", "VP"), ("principal", "Principal")):
+        info = approvers.get(key)
+        sig_imgs.append(sig_flowable(info))
+        name = (info or {}).get("name") or ""
+        sig_caps.append(Paragraph(f"<b>{label}</b><br/>{name}", body))
+    sig_table = Table([sig_imgs, sig_caps], colWidths=[2.33 * inch] * 3)
+    sig_table.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, 0), "BOTTOM"),
+        ("VALIGN", (0, 1), (-1, 1), "TOP"),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("LINEABOVE", (0, 1), (-1, 1), 0.5, NAVY),
+        ("TOPPADDING", (0, 1), (-1, 1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 2),
+    ]))
+    elems.append(sig_table)
+    elems.append(Spacer(1, 8))
+    info_block([
+        ("Receipt Acknowledged (Accounts)",
+         "Yes" if data.get("accounts_acknowledged") else "No"),
+    ])
+    doc.build(elems)
+    return buf.getvalue()
+
+
+def _signature_bytes(cur, user_id):
+    """Return raw signature image bytes for a user, or None."""
+    if not user_id:
+        return None
+    cur.execute("SELECT SignatureData FROM Administration.UserSignatures WHERE UserID = ?",
+                (user_id,))
+    r = cur.fetchone()
+    return bytes(r[0]) if r and r[0] is not None else None
+
+
+def _gather_approvers(cur, req: dict) -> dict:
+    """Build {hod,vp,principal} -> {name, image bytes} from approver-ID columns."""
+    out = {"hod": None, "vp": None, "principal": None}
+    mapping = [("hod", "HOD_Approver_ID"),
+               ("vp", "VP_Approver_ID"),
+               ("principal", "Principal_Approver_ID")]
+    for key, col in mapping:
+        uid = req.get(col)
+        if not uid:
+            continue
+        cur.execute("SELECT FirstName, LastName FROM Administration.Users WHERE UserID = ?",
+                    (uid,))
+        nm = cur.fetchone()
+        name = f"{nm[0]} {nm[1]}" if nm else ""
+        out[key] = {"name": name, "image": _signature_bytes(cur, uid)}
+    return out
+
+
+@app.get("/requisitions/{doc}/approvers")
+def req_approvers(doc: str, _: int = Depends(current_user_id)):
+    """Return approver names + base64 signature images for a requisition."""
+    import base64 as _b64
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM REQUISITION.REQUISITION_TABLE WHERE Document_Number = ?",
+                    (doc,))
+        row = cur.fetchone()
+        if row is None:
+            raise HTTPException(404, "Requisition not found")
+        req = {d[0]: v for d, v in zip(cur.description, row)}
+        gathered = _gather_approvers(cur, req)
+    result = {}
+    for key, info in gathered.items():
+        if info and info.get("image") is not None:
+            result[key] = {"name": info["name"],
+                           "image": _b64.b64encode(info["image"]).decode("ascii")}
+        elif info:
+            result[key] = {"name": info["name"], "image": None}
+        else:
+            result[key] = None
+    return result
+
+
+def _items_mode_for(req: dict, items: list) -> str | None:
+    """Mirror the desktop _items_mode: farm / comments / None."""
+    ITEMS_CATEGORIES = ("Kitchen", "Household", "Stationery")
+    site = (req.get("Site") or "")
+    category = (req.get("Category") or "")
+    if site == "Farm":
+        return "farm"
+    if category in ITEMS_CATEGORIES:
+        return "comments"
+    return None
+
+
+@app.get("/requisitions/{doc}/pdf")
+def req_pdf(doc: str, _: int = Depends(current_user_id)):
+    from fastapi import Response
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM REQUISITION.REQUISITION_TABLE WHERE Document_Number = ?",
+                    (doc,))
+        row = cur.fetchone()
+        if row is None:
+            raise HTTPException(404, "Requisition not found")
+        req = {d[0]: v for d, v in zip(cur.description, row)}
+
+        if (req.get("Phase") or "") != "Completed":
+            raise HTTPException(400, "A PDF is only available for completed requisitions.")
+
+        # items
+        cur.execute("SELECT Item_Name, Amt_In_Stock, Quantity_Requested, Comments, "
+                    "Broiler, Layer, Pigs, Gen_Supply FROM REQUISITION.REQUISITION_ITEMS "
+                    "WHERE Document_Number = ? ORDER BY Item_ID ASC", (doc,))
+        items = [{"Item_Name": r[0] or "", "Amt_In_Stock": r[1] or "",
+                  "Quantity_Requested": r[2] or "", "Comments": r[3] or "",
+                  "Broiler": bool(r[4]), "Layer": bool(r[5]),
+                  "Pigs": bool(r[6]), "Gen_Supply": bool(r[7])} for r in cur.fetchall()]
+
+        approvers = _gather_approvers(cur, req)
+
+    mode = _items_mode_for(req, items)
+    data = {
+        "document_number": req.get("Document_Number"),
+        "created_by":      req.get("Created_By"),
+        "site":            req.get("Site"),
+        "category":        req.get("Category"),
+        "department":      req.get("Department"),
+        "maintenance":     req.get("maintenance"),
+        "academic":        req.get("Academic"),
+        "supplier":        req.get("Supplier"),
+        "purpose":         req.get("Purpose"),
+        "cost":            req.get("Cost"),
+        "phase":           req.get("Phase"),
+        "trip_date":       req.get("Trip_Date"),
+        "destination":     req.get("Destination"),
+        "departure_time":  req.get("Departure_Time"),
+        "items_mode":      mode,
+        "items":           items if mode else [],
+        "requesting":      req.get("Requesting") if mode is None else "",
+        "scope":           req.get("Scope"),
+        "contractor":      req.get("Contractor"),
+        "material":        req.get("Material"),
+        "hod_comment":     req.get("HOD_Comment"),
+        "vp_comment":      req.get("VP_Comment"),
+        "vp_approval":     req.get("VP_Approval"),
+        "principal_comment": req.get("Principal_Comment"),
+        "accounts_acknowledged": req.get("Accounts_Acknowledged"),
+        "approvers":       approvers,
+    }
+    pdf_bytes = build_requisition_pdf(data)
+    return Response(
+        content=pdf_bytes, media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{doc}.pdf"'})
 JWT_ALG = "HS256"
 JWT_TTL_HOURS = 12
 JWT_SECRET = os.environ.get("CTC_JWT_SECRET")

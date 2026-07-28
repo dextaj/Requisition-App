@@ -5,3 +5,5 @@ pyodbc
 bcrypt
 pyjwt
 python-multipart
+reportlab
+reportlab 
