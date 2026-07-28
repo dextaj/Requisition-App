@@ -79,6 +79,27 @@
       .row2 { grid-template-columns: 1fr; }
       .list-scroll { max-height: 40vh; }
     }
+    /* signature modal */
+    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.45);
+               display: none; align-items: center; justify-content: center; z-index: 50; padding: 16px; }
+    .overlay.open { display: flex; }
+    .modal { background: #fff; border-radius: 10px; width: 100%; max-width: 520px;
+             overflow: hidden; display: flex; flex-direction: column; }
+    .modal h3 { margin: 0; padding: 16px 20px; background: #1A2B4A; color: #fff;
+                font-size: 16px; border-bottom: 3px solid #C8A96E; }
+    .sig-preview { margin: 20px; height: 180px; border: 1px dashed #D8D0C8; border-radius: 8px;
+                   display: flex; align-items: center; justify-content: center;
+                   background: #FBF9F5; color: #A8A29E; font-size: 13px; overflow: hidden; }
+    .sig-preview img { max-width: 100%; max-height: 100%; }
+    .modal-foot { display: flex; justify-content: space-between; align-items: center;
+                  gap: 12px; padding: 14px 20px; border-top: 1px solid #eee; flex-wrap: wrap; }
+    .modal-foot .status { font-size: 13px; color: #57534E; }
+    .modal-foot .btns { display: flex; gap: 10px; flex-wrap: wrap; }
+    .modal-foot button { min-height: 44px; padding: 10px 18px; border: none;
+                         border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 14px; }
+    .sig-upload { background: #1A2B4A; color: #fff; }
+    .sig-remove { background: #FBE9E9; color: #B4232A; }
+    .sig-close  { background: #f0eeea; color: #555550; }
   </style>
 </head>
 <body>
@@ -146,13 +167,38 @@
 
       <div class="status-bar" id="statusBar">
         <span class="lbl" id="statusLbl"></span>
-        <button id="toggleBtn" onclick="toggleEnabled()">Disable</button>
+        <div style="display:flex;gap:8px;">
+          <button id="sigBtn" onclick="openSignature()"
+                  style="background:#1A2B4A;color:#fff;">Signature</button>
+          <button id="toggleBtn" onclick="toggleEnabled()">Disable</button>
+        </div>
       </div>
 
       <div class="msg" id="msg"></div>
       <div class="actions">
         <button class="btn-ghost" onclick="clearForm()">Clear</button>
         <button class="btn-save" onclick="saveUser()">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Signature modal -->
+  <div class="overlay" id="sigOverlay">
+    <div class="modal">
+      <h3 id="sigTitle">Signature</h3>
+      <div class="sig-preview" id="sigPreview">No signature on file.</div>
+      <div style="padding:0 20px 4px;">
+        <div class="hint">PNG or JPG. A transparent PNG looks best on documents.</div>
+      </div>
+      <input type="file" id="sigFile" accept="image/png,image/jpeg" style="display:none"
+             onchange="sigFileChosen()">
+      <div class="modal-foot">
+        <span class="status" id="sigStatus"></span>
+        <div class="btns">
+          <button class="sig-close"  onclick="closeSignature()">Close</button>
+          <button class="sig-remove" id="sigRemoveBtn" onclick="removeSignature()">Remove</button>
+          <button class="sig-upload" onclick="document.getElementById('sigFile').click()">Choose image…</button>
+        </div>
       </div>
     </div>
   </div>
@@ -348,6 +394,85 @@
         setMsg("Save failed: " + err.message, "error");
       }
     }
+
+    // ── Signature management ────────────────────────────────────
+    async function openSignature() {
+      if (editingId === null) return;
+      const name = `${document.getElementById("first").value} ${document.getElementById("last").value}`.trim();
+      document.getElementById("sigTitle").textContent = "Signature — " + (name || "User");
+      document.getElementById("sigStatus").textContent = "";
+      const preview = document.getElementById("sigPreview");
+      preview.innerHTML = "Loading…";
+      document.getElementById("sigOverlay").classList.add("open");
+      try {
+        const sig = await api(`/users/${editingId}/signature`);
+        if (sig && sig.data) {
+          preview.innerHTML =
+            `<img src="data:${sig.content_type || "image/png"};base64,${sig.data}" alt="signature">`;
+          document.getElementById("sigRemoveBtn").style.display = "";
+        } else {
+          preview.textContent = "No signature on file.";
+          document.getElementById("sigRemoveBtn").style.display = "none";
+        }
+      } catch (err) {
+        preview.textContent = "Could not load signature.";
+        document.getElementById("sigStatus").textContent = err.message;
+      }
+    }
+
+    function closeSignature() {
+      document.getElementById("sigOverlay").classList.remove("open");
+      document.getElementById("sigFile").value = "";
+    }
+
+    function sigFileChosen() {
+      const file = document.getElementById("sigFile").files[0];
+      if (!file) return;
+      if (file.size > 2 * 1024 * 1024) {
+        document.getElementById("sigStatus").textContent = "Image is too large (max 2 MB).";
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = async () => {
+        // reader.result = "data:image/png;base64,XXXX" — split off the base64 part
+        const commaIdx = reader.result.indexOf(",");
+        const b64 = reader.result.slice(commaIdx + 1);
+        const contentType = file.type || "image/png";
+        // preview immediately
+        document.getElementById("sigPreview").innerHTML =
+          `<img src="${reader.result}" alt="signature">`;
+        document.getElementById("sigStatus").textContent = "Uploading…";
+        try {
+          await api(`/users/${editingId}/signature`, {
+            method: "PUT",
+            body: JSON.stringify({ data: b64, content_type: contentType })
+          });
+          document.getElementById("sigStatus").textContent = "Signature saved.";
+          document.getElementById("sigRemoveBtn").style.display = "";
+        } catch (err) {
+          document.getElementById("sigStatus").textContent = "Upload failed: " + err.message;
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+
+    async function removeSignature() {
+      if (editingId === null) return;
+      if (!confirm("Remove this user's signature?")) return;
+      document.getElementById("sigStatus").textContent = "Removing…";
+      try {
+        await api(`/users/${editingId}/signature`, { method: "DELETE" });
+        document.getElementById("sigPreview").textContent = "No signature on file.";
+        document.getElementById("sigRemoveBtn").style.display = "none";
+        document.getElementById("sigStatus").textContent = "Signature removed.";
+      } catch (err) {
+        document.getElementById("sigStatus").textContent = "Remove failed: " + err.message;
+      }
+    }
+
+    document.getElementById("sigOverlay").addEventListener("click", (e) => {
+      if (e.target.id === "sigOverlay") closeSignature();
+    });
 
     clearForm();
     loadUsers();
