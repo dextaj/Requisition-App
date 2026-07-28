@@ -106,7 +106,7 @@
         localStorage.setItem("ctc_token", data.token);
         localStorage.setItem("ctc_user", data.full_name || "");
         localStorage.setItem("ctc_admin", data.is_admin ? "1" : "");
-        window.location.href = "requisitions.html";
+        window.location.href = data.is_admin ? "admin.html" : "requisitions.html";
       } catch (err) {
         msg.className = "msg error";
         msg.textContent = "Could not reach the server. Is the API running?";
