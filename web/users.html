@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Users — Church Teachers College</title>
   <style>
+    * { box-sizing: border-box; }
     body { font-family: 'Segoe UI', Verdana, sans-serif; background: #F7F3EE;
            margin: 0; color: #1C1917; }
     header { background: #1A2B4A; color: #fff; padding: 16px 24px;
@@ -13,47 +14,70 @@
     header .brand { display: flex; align-items: center; gap: 12px; }
     header img { height: 40px; }
     header h1 { font-size: 18px; margin: 0; }
-    header a { color: #C8A96E; font-size: 13px; text-decoration: none; }
+    header a { color: #C8A96E; font-size: 14px; text-decoration: none; }
+    header a:hover { text-decoration: underline; }
     .wrap { max-width: 1100px; margin: 20px auto; padding: 0 24px;
-            display: grid; grid-template-columns: 380px 1fr; gap: 20px; }
-    .card { background: #fff; border: 1px solid #D8D0C8; border-radius: 6px;
-            overflow: hidden; }
+            display: grid; grid-template-columns: 400px 1fr; gap: 20px; align-items: start; }
+    .card { background: #fff; border: 1px solid #D8D0C8; border-radius: 8px;
+            overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
     .card h2 { font-size: 14px; color: #1A2B4A; margin: 0;
-               padding: 12px 16px; border-bottom: 2px solid #C8A96E;
-               display: flex; justify-content: space-between; align-items: center; }
+               padding: 14px 16px; border-bottom: 2px solid #C8A96E;
+               display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    /* search */
+    .search-wrap { padding: 12px 16px; border-bottom: 1px solid #eee; }
+    .search-wrap input { width: 100%; padding: 10px 12px; border: 1px solid #D8D0C8;
+            border-radius: 6px; font-size: 14px; }
+    .search-wrap input:focus { outline: none; border-color: #1A2B4A;
+            box-shadow: 0 0 0 3px rgba(26,43,74,0.10); }
+    /* list */
+    .list-scroll { max-height: 62vh; overflow-y: auto; }
     table { width: 100%; border-collapse: collapse; }
     th { text-align: left; padding: 10px 14px; font-size: 12px; color: #78716C;
-         border-bottom: 1px solid #eee; }
-    td { padding: 10px 14px; font-size: 13px; border-bottom: 1px solid #f2efe9; }
+         border-bottom: 1px solid #eee; position: sticky; top: 0; background: #fff; }
+    td { padding: 12px 14px; font-size: 14px; border-bottom: 1px solid #f2efe9; }
     tbody tr { cursor: pointer; }
     tbody tr:hover { background: #FBF9F5; }
     tbody tr.selected { background: #F0F4FA; }
-    .form-body { padding: 16px; }
-    /* two-column field grid to match the desktop form */
-    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-    .field { margin-bottom: 14px; }
+    tr.disabled td:first-child { color: #A8A29E; }
+    .pill { display: inline-block; font-size: 11px; font-weight: bold;
+            padding: 3px 9px; border-radius: 999px; }
+    .pill-on  { background: #E7F6EC; color: #16794C; }
+    .pill-off { background: #FBE9E9; color: #B4232A; }
+    /* form */
+    .form-body { padding: 18px; }
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .field { margin-bottom: 16px; }
     label { display: block; font-size: 12px; font-weight: bold; color: #78716C;
-            margin-bottom: 4px; }
-    input { width: 100%; padding: 9px; border: 1px solid #D8D0C8; border-radius: 4px;
-            font-size: 14px; box-sizing: border-box; }
-    input:focus { outline: none; border-color: #1A2B4A;
+            margin-bottom: 5px; }
+    input.txt { width: 100%; padding: 11px; border: 1px solid #D8D0C8; border-radius: 6px;
+            font-size: 15px; }
+    input.txt:focus { outline: none; border-color: #1A2B4A;
                   box-shadow: 0 0 0 3px rgba(26,43,74,0.10); }
-    .hint { font-size: 11px; color: #A8A29E; margin-top: 4px; }
+    .hint { font-size: 11px; color: #A8A29E; margin-top: 5px; }
     .note { font-size: 12px; color: #A8A29E; border-top: 1px solid #eee;
-            padding-top: 12px; margin-top: 2px; }
-    .actions { padding: 14px 16px; border-top: 1px solid #D8D0C8;
-               display: flex; gap: 10px; justify-content: flex-end; }
-    button { padding: 9px 18px; border: none; border-radius: 4px; font-size: 13px;
-             font-weight: bold; cursor: pointer; }
-    .btn-new { background: #f0eeea; color: #555550; }
-    .btn-save { background: #1A2B4A; color: #fff; }
+            padding-top: 14px; margin-top: 2px; }
+    .status-bar { display: none; align-items: center; justify-content: space-between;
+            gap: 12px; padding: 12px 18px; border-top: 1px solid #eee;
+            background: #FBF9F5; }
+    .status-bar .lbl { font-size: 13px; color: #57534E; }
+    .actions { padding: 16px 18px; border-top: 1px solid #D8D0C8;
+               display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
+    button { padding: 11px 20px; border: none; border-radius: 6px; font-size: 14px;
+             font-weight: bold; cursor: pointer; min-height: 44px; }
+    .btn-ghost { background: #f0eeea; color: #555550; }
+    .btn-save  { background: #1A2B4A; color: #fff; }
     .btn-save:hover { background: #24406b; }
-    .msg { padding: 0 16px 14px; font-size: 13px; min-height: 16px; }
+    .btn-new   { background: #C8A96E; color: #3a2e12; padding: 6px 12px; min-height: 0;
+                 font-size: 13px; }
+    .btn-disable { background: #B4232A; color: #fff; }
+    .btn-enable  { background: #16794C; color: #fff; }
+    .msg { padding: 0 18px 14px; font-size: 14px; min-height: 18px; }
     .ok { color: #16A34A; } .error { color: #DC2626; }
-    .empty { padding: 24px 16px; color: #A8A29E; font-size: 13px; text-align: center; }
+    .empty { padding: 28px 16px; color: #A8A29E; font-size: 14px; text-align: center; }
     @media (max-width: 820px) {
-      .wrap { grid-template-columns: 1fr; }
+      .wrap { grid-template-columns: 1fr; padding: 0 14px; }
       .row2 { grid-template-columns: 1fr; }
+      .list-scroll { max-height: 40vh; }
     }
   </style>
 </head>
@@ -69,7 +93,11 @@
   <div class="wrap">
     <div class="card">
       <h2>All Users <button class="btn-new" onclick="newUser()">+ New User</button></h2>
-      <div id="userList"><div class="empty">Loading…</div></div>
+      <div class="search-wrap">
+        <input id="search" type="text" placeholder="Search name, username, or email…"
+               oninput="renderList()">
+      </div>
+      <div class="list-scroll" id="userList"><div class="empty">Loading…</div></div>
     </div>
 
     <div class="card">
@@ -78,27 +106,27 @@
         <div class="row2">
           <div class="field">
             <label for="first">First Name</label>
-            <input id="first">
+            <input class="txt" id="first">
           </div>
           <div class="field">
             <label for="last">Last Name</label>
-            <input id="last">
+            <input class="txt" id="last">
           </div>
         </div>
         <div class="row2">
           <div class="field">
             <label for="email">Email</label>
-            <input id="email" type="email">
+            <input class="txt" id="email" type="email">
           </div>
           <div class="field">
             <label for="username">Username</label>
-            <input id="username" autocomplete="off">
+            <input class="txt" id="username" autocomplete="off">
           </div>
         </div>
         <div class="row2">
           <div class="field">
             <label for="osuser">OS Username</label>
-            <input id="osuser" autocomplete="off">
+            <input class="txt" id="osuser" autocomplete="off">
             <div class="hint">Windows login name — enables desktop single sign-on.</div>
           </div>
           <div></div>
@@ -106,18 +134,24 @@
         <div class="row2">
           <div class="field">
             <label for="password">Password</label>
-            <input id="password" type="password" autocomplete="new-password">
+            <input class="txt" id="password" type="password" autocomplete="new-password">
           </div>
           <div class="field">
             <label for="password2">Confirm Password</label>
-            <input id="password2" type="password" autocomplete="new-password">
+            <input class="txt" id="password2" type="password" autocomplete="new-password">
           </div>
         </div>
         <div class="note" id="pwHint">Password is required for a new user.</div>
       </div>
+
+      <div class="status-bar" id="statusBar">
+        <span class="lbl" id="statusLbl"></span>
+        <button id="toggleBtn" onclick="toggleEnabled()">Disable</button>
+      </div>
+
       <div class="msg" id="msg"></div>
       <div class="actions">
-        <button class="btn-new" onclick="clearForm()">Clear</button>
+        <button class="btn-ghost" onclick="clearForm()">Clear</button>
         <button class="btn-save" onclick="saveUser()">Save</button>
       </div>
     </div>
@@ -128,14 +162,14 @@
     const token = localStorage.getItem("ctc_token");
     if (!token) { window.location.href = "login.html"; }
 
-    // Admin-only screen: bounce non-admins back to the list.
     if (localStorage.getItem("ctc_admin") !== "1") {
       alert("Only administrators can manage users.");
       window.location.href = "requisitions.html";
     }
 
     let users = [];
-    let editingId = null;   // null = creating a new user
+    let editingId = null;       // null = creating a new user
+    let editingEnabled = true;  // enabled state of the user being edited
 
     async function api(path, opts = {}) {
       const res = await fetch(`${API_BASE}${path}`, {
@@ -158,7 +192,7 @@
         ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
     }
 
-    // User arrays: [UserID, FirstName, LastName, UserName, Email, OSuser]
+    // User arrays: [UserID, FirstName, LastName, UserName, Email, OSuser, Enabled]
     async function loadUsers() {
       try {
         users = await api("/users") || [];
@@ -171,16 +205,27 @@
 
     function renderList() {
       const el = document.getElementById("userList");
-      if (!users.length) { el.innerHTML = '<div class="empty">No users yet.</div>'; return; }
+      const q = (document.getElementById("search").value || "").toLowerCase().trim();
+      const rows = users.filter(u => {
+        if (!q) return true;
+        return [u[1], u[2], u[3], u[4]].some(v => String(v ?? "").toLowerCase().includes(q));
+      });
+      if (!rows.length) {
+        el.innerHTML = `<div class="empty">${q ? "No matching users." : "No users yet."}</div>`;
+        return;
+      }
       el.innerHTML = `
         <table>
-          <thead><tr><th>Name</th><th>Username</th></tr></thead>
+          <thead><tr><th>Name</th><th>Username</th><th>Status</th></tr></thead>
           <tbody>
-            ${users.map(u => `
+            ${rows.map(u => `
               <tr data-id="${u[0]}" onclick="selectUser(${u[0]})"
-                  class="${u[0] === editingId ? 'selected' : ''}">
+                  class="${u[0] === editingId ? 'selected' : ''} ${u[6] ? '' : 'disabled'}">
                 <td>${esc(u[2])}, ${esc(u[1])}</td>
                 <td>${esc(u[3])}</td>
+                <td>${u[6]
+                  ? '<span class="pill pill-on">Enabled</span>'
+                  : '<span class="pill pill-off">Disabled</span>'}</td>
               </tr>`).join("")}
           </tbody>
         </table>`;
@@ -188,9 +233,10 @@
 
     async function selectUser(id) {
       try {
-        const u = await api(`/users/${id}`);   // [UserID,First,Last,UserName,Email,OSuser]
+        const u = await api(`/users/${id}`);   // [ID,First,Last,UserName,Email,OSuser,Enabled]
         if (!u) return;
         editingId = id;
+        editingEnabled = !!u[6];
         document.getElementById("formTitle").textContent = "Edit User";
         document.getElementById("first").value    = u[1] || "";
         document.getElementById("last").value     = u[2] || "";
@@ -201,19 +247,58 @@
         document.getElementById("password2").value = "";
         document.getElementById("pwHint").textContent =
           "Leave password blank to keep the existing password.";
+        renderStatusBar();
         setMsg("", "");
-        renderList();   // refresh row highlight
+        renderList();
       } catch (err) { setMsg(err.message, "error"); }
+    }
+
+    function renderStatusBar() {
+      const bar = document.getElementById("statusBar");
+      if (editingId === null) { bar.style.display = "none"; return; }
+      bar.style.display = "flex";
+      const lbl = document.getElementById("statusLbl");
+      const btn = document.getElementById("toggleBtn");
+      if (editingEnabled) {
+        lbl.textContent = "This account is enabled and can sign in.";
+        btn.textContent = "Disable account";
+        btn.className = "btn-disable";
+      } else {
+        lbl.textContent = "This account is disabled and cannot sign in.";
+        btn.textContent = "Enable account";
+        btn.className = "btn-enable";
+      }
+    }
+
+    async function toggleEnabled() {
+      if (editingId === null) return;
+      const makeEnabled = !editingEnabled;
+      const verb = makeEnabled ? "enable" : "disable";
+      if (!confirm(`Are you sure you want to ${verb} this account?`)) return;
+      setMsg("Updating…", "");
+      try {
+        await api(`/users/${editingId}/enabled`, {
+          method: "PUT", body: JSON.stringify({ enabled: makeEnabled })
+        });
+        editingEnabled = makeEnabled;
+        renderStatusBar();
+        setMsg(makeEnabled ? "Account enabled." : "Account disabled.", "ok");
+        await loadUsers();
+      } catch (err) {
+        setMsg("Could not update status: " + err.message, "error");
+      }
     }
 
     function newUser() { clearForm(); }
 
     function clearForm() {
       editingId = null;
+      editingEnabled = true;
       document.getElementById("formTitle").textContent = "New User";
       ["first","last","username","email","osuser","password","password2"].forEach(
         id => document.getElementById(id).value = "");
       document.getElementById("pwHint").textContent = "Password is required for a new user.";
+      renderStatusBar();
       setMsg("", "");
       renderList();
     }
@@ -264,6 +349,7 @@
       }
     }
 
+    clearForm();
     loadUsers();
   </script>
 </body>
