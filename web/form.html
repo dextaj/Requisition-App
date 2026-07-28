@@ -360,6 +360,7 @@
           <button class="btn-back" onclick="location.href='requisitions.html'">Back</button>
           <button class="btn-save" onclick="save()">Save</button>
           <button class="btn-submit" onclick="openSubmit()" id="submitBtn">Submit</button>
+          ${(loaded.Phase === "Completed") ? `<button onclick="downloadPdf()" style="background:#C8A96E;color:#3a2e12">Download PDF</button>` : ""}
         </div>`;
       // Disable Submit if already at the final phase
       const phases = getPhases(loaded.Category, loaded.Maintenance_Unit == 1);
@@ -554,6 +555,26 @@
         msg.className = "msg ok"; msg.textContent = "Saved.";
       } catch (err) {
         msg.className = "msg error"; msg.textContent = "Save failed: " + err.message;
+      }
+    }
+    async function downloadPdf() {
+      const pdfDoc = loaded.Document_Number || doc;
+      const btnMsg = document.getElementById("msg");
+      try {
+        const res = await fetch(`${API_BASE}/requisitions/${encodeURIComponent(pdfDoc)}/pdf`, {
+          headers: { "Authorization": "Bearer " + token }
+        });
+        if (res.status === 401) { window.location.href = "login.html"; return; }
+        if (!res.ok) {
+          let detail = `Could not generate PDF (${res.status}).`;
+          try { const j = await res.json(); if (j.detail) detail = j.detail; } catch {}
+          if (btnMsg) { btnMsg.className = "msg error"; btnMsg.textContent = detail; }
+          return;
+        }
+        const blob = await res.blob();
+        window.open(URL.createObjectURL(blob), "_blank");
+      } catch (err) {
+        if (btnMsg) { btnMsg.className = "msg error"; btnMsg.textContent = "PDF error: " + err.message; }
       }
     }
     const INT_FIELDS = ["Maintenance_Unit","Accounts_Acknowledged",
