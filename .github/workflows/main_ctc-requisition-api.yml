@@ -8,6 +8,10 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'auth_api.py'
+      - 'requirements.txt'
+      - '.github/workflows/main_ctc-requisition-api.yml'
   workflow_dispatch:
 
 jobs:
@@ -37,7 +41,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: python-app
+          retention-days: 1
           path: |
+            .
+            !antenv/
             .
             !antenv/
 
