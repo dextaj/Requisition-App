@@ -96,7 +96,9 @@
     let loaded = {};      // the full requisition as loaded (all fields preserved)
     let lists = {};       // dropdown options
     let loadedItems = [];
-	let loadedHistory = [];
+    let loadedHistory = [];
+    let loadedAttachments = [];
+
 
     async function api(path, opts = {}) {
       const res = await fetch(`${API_BASE}${path}`, {
@@ -174,6 +176,7 @@
           it.Pigs = it.Pigs ? 1 : 0; it.Gen_Supply = it.Gen_Supply ? 1 : 0;
         });
         loadedHistory = await api(`/requisitions/${encodeURIComponent(doc)}/history`) || [];
+        loadedAttachments = await api(`/requisitions/${encodeURIComponent(doc)}/attachments`) || [];
         render();
       } catch (err) {
         document.getElementById("content").innerHTML =
@@ -357,6 +360,7 @@
               + Add Row</button>
           </div>
         </div>` : ""}
+        ${renderAttachments()}
         ${renderHistory()}
         <div class="msg" id="msg"></div>
         <div class="actions">
@@ -466,6 +470,146 @@
         : "";
       return `<tr>${th("Item")}${th("In Stock")}${th("Qty Req")}${th("Comments")}${farmTh}
               <th style="width:36px;border-bottom:2px solid #C8A96E"></th></tr>`;
+    }
+    // ── Attachments ─────────────────────────────────────────────
+    // Array shape: [Attachment_ID, File_Name, Uploaded_By, Upload_Date]
+    function canEditAttachments() {
+      const p = loaded.Phase || "";
+      return p === "" || p === "Draft" || p === "Maintenance Unit";
+    }
+
+    function renderAttachments() {
+      const rows = loadedAttachments.map(a => `
+        <tr>
+          <td style="padding:8px;border-bottom:1px solid #eee;font-size:13px">
+            <a href="#" onclick="downloadAttachment(${a[0]});return false;"
+               style="color:#2563EB;text-decoration:none">${esc(a[1])}</a>
+          </td>
+          <td style="padding:8px;border-bottom:1px solid #eee;font-size:13px">${esc(a[2])}</td>
+          <td style="padding:8px;border-bottom:1px solid #eee;font-size:13px">${esc(a[3])}</td>
+          <td style="padding:8px;border-bottom:1px solid #eee;text-align:center">
+            ${canEditAttachments()
+              ? `<button onclick="removeAttachment(${a[0]})"
+                   style="background:#DC2626;color:#fff;border:none;border-radius:4px;
+                          padding:4px 10px;font-size:12px;cursor:pointer">Remove</button>`
+              : ""}
+          </td>
+        </tr>`).join("");
+
+      const uploadRow = canEditAttachments() ? `
+        <div style="padding:12px 16px;border-top:1px solid #eee;display:flex;
+                    gap:10px;align-items:center;flex-wrap:wrap">
+          <input type="file" id="attachFile"
+                 style="font-size:13px;flex:1;min-width:200px">
+          <button onclick="uploadAttachment()"
+                  style="background:#1A2B4A;color:#fff;border:none;border-radius:4px;
+                         padding:8px 16px;font-size:13px;font-weight:bold;cursor:pointer">
+            Upload</button>
+          <span id="attachMsg" style="font-size:12px;color:#78716C"></span>
+        </div>` : "";
+
+      const table = loadedAttachments.length ? `
+        <table style="width:100%;border-collapse:collapse">
+          <thead>
+            <tr>
+              <th style="text-align:left;padding:8px;border-bottom:2px solid #C8A96E;font-size:12px">File</th>
+              <th style="text-align:left;padding:8px;border-bottom:2px solid #C8A96E;font-size:12px">Uploaded By</th>
+              <th style="text-align:left;padding:8px;border-bottom:2px solid #C8A96E;font-size:12px">Date</th>
+              <th style="width:80px;border-bottom:2px solid #C8A96E"></th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>`
+        : `<div style="padding:16px;color:#78716C;font-size:13px">No attachments yet.</div>`;
+
+      return `
+        <div class="card">
+          <h2>Attachments</h2>
+          ${table}
+          ${uploadRow}
+        </div>`;
+    }
+
+    async function uploadAttachment() {
+      const fileInput = document.getElementById("attachFile");
+      const msg = document.getElementById("attachMsg");
+      const uploadDoc = loaded.Document_Number || doc;
+      if (!uploadDoc) {
+        if (msg) { msg.style.color = "#DC2626"; msg.textContent = "Save the requisition first."; }
+        return;
+      }
+      if (!fileInput.files.length) {
+        if (msg) { msg.style.color = "#DC2626"; msg.textContent = "Choose a file first."; }
+        return;
+      }
+      const file = fileInput.files[0];
+      if (file.size > 25 * 1024 * 1024) {
+        if (msg) { msg.style.color = "#DC2626"; msg.textContent = "File too large (max 25 MB)."; }
+        return;
+      }
+      if (msg) { msg.style.color = "#78716C"; msg.textContent = "Uploading…"; }
+      const form = new FormData();
+      form.append("file", file);
+      try {
+        const res = await fetch(
+          `${API_BASE}/requisitions/${encodeURIComponent(uploadDoc)}/attachments`,
+          { method: "POST",
+            headers: { "Authorization": "Bearer " + token },
+            body: form });
+        if (res.status === 401) { window.location.href = "login.html"; return; }
+        if (!res.ok) {
+          let detail = `Upload failed (${res.status}).`;
+          try { const j = await res.json(); if (j.detail) detail = j.detail; } catch {}
+          if (msg) { msg.style.color = "#DC2626"; msg.textContent = detail; }
+          return;
+        }
+        // refresh the list
+        loadedAttachments = await api(`/requisitions/${encodeURIComponent(uploadDoc)}/attachments`) || [];
+        render();
+      } catch (err) {
+        if (msg) { msg.style.color = "#DC2626"; msg.textContent = "Error: " + err.message; }
+      }
+    }
+
+    async function downloadAttachment(attId) {
+      try {
+        const res = await fetch(`${API_BASE}/attachments/${attId}/download`, {
+          headers: { "Authorization": "Bearer " + token }
+        });
+        if (res.status === 401) { window.location.href = "login.html"; return; }
+        if (!res.ok) { alert("Could not download the file."); return; }
+        const blob = await res.blob();
+        // trigger a browser download
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        // filename comes from the attachment list
+        const found = loadedAttachments.find(x => x[0] === attId);
+        a.download = found ? found[1] : "attachment";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        alert("Download error: " + err.message);
+      }
+    }
+
+    async function removeAttachment(attId) {
+      if (!confirm("Remove this attachment?")) return;
+      try {
+        const res = await fetch(`${API_BASE}/attachments/${attId}`, {
+          method: "DELETE",
+          headers: { "Authorization": "Bearer " + token }
+        });
+        if (res.status === 401) { window.location.href = "login.html"; return; }
+        if (!res.ok) { alert("Could not remove the attachment."); return; }
+        const rdoc = loaded.Document_Number || doc;
+        loadedAttachments = await api(`/requisitions/${encodeURIComponent(rdoc)}/attachments`) || [];
+        render();
+      } catch (err) {
+        alert("Remove error: " + err.message);
+      }
     }
     function renderHistory() {
       if (!loadedHistory.length) return "";
