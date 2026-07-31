@@ -1,0 +1,10 @@
+name: Build and deploy Python app to Azure Web App - ctc-requisition-api
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'auth_api.py'
+      - 'requirements.txt'
+      - '.github/workflows/main_ctc-requisition-api.yml'
+  workflow_dispatch:
