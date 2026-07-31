@@ -816,6 +816,24 @@ def req_submit(doc: str, body: SubmitReqIn, caller: int = Depends(current_user_i
         conn.commit()
     return {"next_phase": next_phase}
 
+# ============================================================================
+#  ATTACHMENTS (Azure Blob Storage version)
+#  Replaces the four local-disk attachment endpoints.
+#  Requires 'azure-storage-blob' in requirements.txt and the
+#  AZURE_STORAGE_CONNECTION_STRING app setting.
+# ============================================================================
+from azure.storage.blob import BlobServiceClient
+from fastapi import Response as _Response
+
+_BLOB_CONTAINER = "attachments"
+
+def _blob_container_client():
+    conn_str = os.environ.get("AZURE_STORAGE_CONNECTION_STRING")
+    if not conn_str:
+        raise HTTPException(500, "Attachment storage is not configured.")
+    svc = BlobServiceClient.from_connection_string(conn_str)
+    return svc.get_container_client(_BLOB_CONTAINER)
+
 
 @app.get("/requisitions/{doc}/attachments")
 def req_attachments(doc: str, _: int = Depends(current_user_id)):
@@ -831,10 +849,11 @@ def req_attachments(doc: str, _: int = Depends(current_user_id)):
 def req_upload_attachment(doc: str, file: UploadFile = File(...),
                           caller: int = Depends(current_user_id)):
     key = f"{doc}/{uuid.uuid4().hex}_{file.filename}"
-    dest = os.path.join(STORAGE_DIR, key)
-    os.makedirs(os.path.dirname(dest), exist_ok=True)
-    with open(dest, "wb") as fh:
-        shutil.copyfileobj(file.file, fh)
+    # Upload the file to blob storage
+    container = _blob_container_client()
+    data = file.file.read()
+    container.upload_blob(name=key, data=data, overwrite=True)
+    # Record it in the database (File_Path stores the blob key)
     with get_connection() as conn:
         cur = conn.cursor()
         cur.execute("INSERT INTO REQUISITION.REQUISITION_ATTACHMENTS "
@@ -855,16 +874,31 @@ def req_download_attachment(att_id: int, _: int = Depends(current_user_id)):
         row = cur.fetchone()
     if row is None:
         raise HTTPException(404, "Attachment not found")
-    path = os.path.join(STORAGE_DIR, row[1])
-    if not os.path.exists(path):
+    file_name, blob_key = row[0], row[1]
+    container = _blob_container_client()
+    try:
+        stream = container.download_blob(blob_key)
+        content = stream.readall()
+    except Exception:
         raise HTTPException(404, "File missing from storage")
-    return FileResponse(path, filename=row[0])
+    return _Response(
+        content=content, media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{file_name}"'})
 
 
 @app.delete("/attachments/{att_id}")
 def req_delete_attachment(att_id: int, _: int = Depends(current_user_id)):
     with get_connection() as conn:
         cur = conn.cursor()
+        cur.execute("SELECT File_Path FROM REQUISITION.REQUISITION_ATTACHMENTS "
+                    "WHERE Attachment_ID = ?", (att_id,))
+        row = cur.fetchone()
+        # Delete the blob (best-effort; ignore if already gone)
+        if row and row[0]:
+            try:
+                _blob_container_client().delete_blob(row[0])
+            except Exception:
+                pass
         cur.execute("DELETE FROM REQUISITION.REQUISITION_ATTACHMENTS WHERE Attachment_ID = ?",
                     (att_id,))
         conn.commit()

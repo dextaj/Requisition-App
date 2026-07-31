@@ -6,4 +6,5 @@ bcrypt
 pyjwt
 python-multipart
 reportlab
-reportlab 
+azure-storage-blob
+ 
