@@ -50,6 +50,14 @@
     <input type="text" id="search" placeholder="Search..." oninput="render()">
     <button onclick="logout()" style="background:#DC2626;color:#fff">Sign Out</button>
   </div>
+  <div class="bar" style="padding-top:0">
+    <span style="font-size:12px;color:#78716C;font-weight:bold">Department:</span>
+    <button id="fltAll" class="active" onclick="setDept('')">All</button>
+    <button id="fltKitchen" onclick="setDept('kitchen')">Kitchen</button>
+    <button id="fltHousehold" onclick="setDept('household')">Household</button>
+    <button id="fltIT" onclick="setDept('it')">IT</button>
+    <button id="fltMaintenance" onclick="setDept('maintenance')">Maintenance</button>
+  </div>
 
   <table>
     <thead>
@@ -75,6 +83,9 @@
 
     let allRows = [];
     let scope = "mine";
+    let deptFilter = "";  // "", "kitchen", "household", "it", "maintenance"
+    // Column indices of the Send_* flags in the row array — ADJUST THESE
+    const DEPT_COL = { kitchen: 36, household: 37, it: 38, maintenance: 39 };    
     let sortCol = 2, sortAsc = true;
 
     // Helper: authenticated fetch
@@ -102,6 +113,7 @@
         allRows = await apiGet(`/requisitions?scope=${scope}`) || [];
         msg.textContent = allRows.length ? "" : "No requisitions found.";
         render();
+       console.log(allRows[0])
       } catch (err) {
         msg.textContent = "Error loading requisitions: " + err.message;
       }
@@ -117,11 +129,12 @@
 
     function render() {
       const q = document.getElementById("search").value.toLowerCase();
-      let rows = allRows.filter(r =>
-        !q || [2,3,4,6,15,10].some(i => String(r[i] || "").toLowerCase().includes(q)));
-      rows.sort((a, b) => {
-        const av = String(a[sortCol] || ""), bv = String(b[sortCol] || "");
-        return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
+      let rows = allRows.filter(r => {
+        const matchesSearch = !q ||
+          [2,3,4,6,15,10].some(i => String(r[i] || "").toLowerCase().includes(q));
+        const col = deptFilter ? DEPT_COL[deptFilter] : null;
+        const matchesDept = !deptFilter || (col != null && (r[col] === 1 || r[col] === true));
+        return matchesSearch && matchesDept;
       });
       const tbody = document.getElementById("rows");
       tbody.innerHTML = "";
@@ -147,6 +160,16 @@
       document.getElementById("btnMine").classList.toggle("active", s === "mine");
       document.getElementById("btnAll").classList.toggle("active", s === "all");
       load();
+    }
+    function setDept(d) {
+      deptFilter = d;
+      for (const [key, id] of Object.entries({
+        "": "fltAll", kitchen: "fltKitchen", household: "fltHousehold",
+        it: "fltIT", maintenance: "fltMaintenance"
+      })) {
+        document.getElementById(id).classList.toggle("active", key === d);
+      }
+      render();
     }
     function sortBy(col) {
       if (sortCol === col) sortAsc = !sortAsc; else { sortCol = col; sortAsc = true; }
